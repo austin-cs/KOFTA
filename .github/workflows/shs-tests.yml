@@ -1,0 +1,40 @@
+name: shs-tests
+
+on:
+  push:
+    paths:
+      - "shs/**"
+      - "kofta-stats"
+      - "kofta-shs"
+      - "kofta-campaign"
+      - ".github/workflows/shs-tests.yml"
+  pull_request:
+    paths:
+      - "shs/**"
+      - "kofta-stats"
+      - "kofta-shs"
+      - "kofta-campaign"
+      - ".github/workflows/shs-tests.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # The SHS harness self-tests use only the standard library (numpy and the
+      # anthropic SDK are imported lazily and not exercised offline), so no pip
+      # install is needed to run them.
+      - name: stats self-tests
+        run: python -m shs.tests.test_stats
+
+      - name: service self-tests (offline MockClient, no API key)
+        run: python -m shs.tests.test_service
+
+      - name: table emitter end-to-end tests
+        run: python -m shs.tests.test_tables
