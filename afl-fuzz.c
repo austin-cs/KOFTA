@@ -2609,6 +2609,210 @@ static void dump_kofta_arglist(u8* alname) {
 
 }
 
+
+/* ---- Semantic Hint Synthesis (SHS) -------------------------------------- *
+ * Gated entirely on $KOFTA_SHS (the command used to reach the LLM endpoint,
+ * e.g. "./kofta-shs query --mock --cache wd/shs/cache.json"). When unset the
+ * whole path is inert and KOFTA behaves exactly as before. The model only
+ * proposes candidate argument strings; the forkserver still decides whether a
+ * candidate advances coverage, so correctness never depends on the LLM. The
+ * source context for each comparison comes from the srcmap the LLVM pass wrote
+ * (keyed by the observed operand), so no source tree is needed at fuzz time. */
+
+#define KOFTA_SHS_MAX 16
+
+static u8* kofta_shs_cmd;        /* $KOFTA_SHS command string, NULL = off */
+static u8  kofta_shs_ready;      /* lazy-init guard */
+
+struct kofta_srcrec {
+  u8* operand;                   /* the comparison operand (lookup key) */
+  u8* slice;                     /* +/-k source-line context for the LLM */
+};
+static struct kofta_srcrec* kofta_srcmap;
+static u32 kofta_srcmap_cnt;
+
+static void kofta_shs_init(void) {
+
+  kofta_shs_ready = 1;
+
+  kofta_shs_cmd = (u8*)getenv("KOFTA_SHS");
+  if (!kofta_shs_cmd) return;
+
+  u8* path = (u8*)getenv("KOFTA_SRCMAP");
+  if (!path) return;
+
+  FILE* f = fopen((char*)path, "r");
+  if (!f) return;
+
+  char*  line = NULL;
+  size_t cap  = 0;
+
+  while (getline(&line, &cap, f) != -1) {
+
+    if (line[0] != '@') continue;
+
+    int  nslice = 0, srcline = 0;
+    char kind[32];
+    if (sscanf(line, "@ %31s %d %d", kind, &nslice, &srcline) != 3) continue;
+
+    /* operand line: "= <operand>\n" */
+    if (getline(&line, &cap, f) == -1) break;
+    if (line[0] != '=' || line[1] != ' ') continue;
+    u8* operand = (u8*)strdup(line + 2);
+    char* nl = strchr((char*)operand, '\n');
+    if (nl) *nl = '\0';
+
+    /* nslice body lines: "| <src>\n", concatenated verbatim */
+    u8* slice = ck_alloc(1);
+    u32 slen  = 0;
+    for (int s = 0; s < nslice; s++) {
+      if (getline(&line, &cap, f) == -1) break;
+      if (line[0] != '|') continue;
+      char* body = line + (line[1] == ' ' ? 2 : 1);
+      u32   blen = strlen(body);
+      slice = ck_realloc(slice, slen + blen + 1);
+      memcpy(slice + slen, body, blen);
+      slen += blen;
+      slice[slen] = '\0';
+    }
+
+    kofta_srcmap = ck_realloc(kofta_srcmap,
+                              (kofta_srcmap_cnt + 1) * sizeof(struct kofta_srcrec));
+    kofta_srcmap[kofta_srcmap_cnt].operand = operand;
+    kofta_srcmap[kofta_srcmap_cnt].slice   = slice;
+    kofta_srcmap_cnt++;
+
+  }
+
+  if (line) free(line);
+  fclose(f);
+
+}
+
+static u8* kofta_srcmap_lookup(u8* operand) {
+
+  for (u32 i = 0; i < kofta_srcmap_cnt; i++)
+    if (!strcmp((char*)kofta_srcmap[i].operand, (char*)operand))
+      return kofta_srcmap[i].slice;
+  return NULL;
+
+}
+
+static u8* kofta_json_append(u8* dst, u32* len, const char* src, u8 escape) {
+
+  for (const char* p = src; *p; p++) {
+
+    char esc[8];
+    int  n;
+
+    if (!escape) { esc[0] = *p; n = 1; }
+    else switch (*p) {
+      case '"':  memcpy(esc, "\\\"", 2); n = 2; break;
+      case '\\': memcpy(esc, "\\\\", 2); n = 2; break;
+      case '\n': memcpy(esc, "\\n",  2); n = 2; break;
+      case '\r': memcpy(esc, "\\r",  2); n = 2; break;
+      case '\t': memcpy(esc, "\\t",  2); n = 2; break;
+      default:
+        if ((unsigned char)*p < 0x20) n = sprintf(esc, "\\u%04x", (unsigned char)*p);
+        else { esc[0] = *p; n = 1; }
+    }
+
+    dst = ck_realloc(dst, *len + n + 1);
+    memcpy(dst + *len, esc, n);
+    *len += n;
+    dst[*len] = '\0';
+
+  }
+
+  return dst;
+
+}
+
+/* Ask the SHS endpoint for candidate argument strings related to a stuck
+   comparison. Fills out[] (each KOFTA_ARGV_SIZE bytes) and returns the count. */
+
+static u32 kofta_shs_candidates(u8* option, const char* sink_type,
+                                u8* operand, arglist* out, u32 max) {
+
+  if (!kofta_shs_ready) kofta_shs_init();
+  if (!kofta_shs_cmd) return 0;
+
+  u8* slice = kofta_srcmap_lookup(operand);
+  if (!slice) return 0;
+
+  u32 jl   = 0;
+  u8* json = ck_alloc(1);
+  json = kofta_json_append(json, &jl, "{\"option\":\"", 0);
+  json = kofta_json_append(json, &jl, (char*)option, 1);
+  json = kofta_json_append(json, &jl, "\",\"sink_type\":\"", 0);
+  json = kofta_json_append(json, &jl, sink_type, 1);
+  json = kofta_json_append(json, &jl, "\",\"observed_operand\":\"", 0);
+  json = kofta_json_append(json, &jl, (char*)operand, 1);
+  json = kofta_json_append(json, &jl, "\",\"source_slice\":\"", 0);
+  json = kofta_json_append(json, &jl, (char*)slice, 1);
+  json = kofta_json_append(json, &jl, "\"}\n", 0);
+
+  char tmp[] = "/tmp/kofta_shs_req_XXXXXX";
+  int  fd    = mkstemp(tmp);
+  if (fd < 0) { ck_free(json); return 0; }
+  ck_write(fd, json, jl, (u8*)tmp);
+  close(fd);
+  ck_free(json);
+
+  u8*   cmd = alloc_printf("%s < %s", kofta_shs_cmd, tmp);
+  FILE* p   = popen((char*)cmd, "r");
+  ck_free(cmd);
+  if (!p) { unlink(tmp); return 0; }
+
+  u8*    resp = ck_alloc(1);
+  u32    rl   = 0;
+  char   buf[4096];
+  size_t got;
+  while ((got = fread(buf, 1, sizeof(buf), p)) > 0) {
+    resp = ck_realloc(resp, rl + got + 1);
+    memcpy(resp + rl, buf, got);
+    rl += got;
+    resp[rl] = '\0';
+  }
+  pclose(p);
+  unlink(tmp);
+
+  /* Parse the JSON array of strings: ["a","b",...]. */
+  u32   cnt = 0;
+  char* q   = (char*)resp;
+  while (cnt < max && (q = strchr(q, '"'))) {
+    q++;
+    u8* o = out[cnt];
+    u32 w = 0;
+    while (*q && *q != '"' && w < KOFTA_ARGV_SIZE - 1) {
+      char c = *q++;
+      if (c == '\\' && *q) {
+        char e = *q++;
+        switch (e) {
+          case 'n': c = '\n'; break;
+          case 't': c = '\t'; break;
+          case 'r': c = '\r'; break;
+          case 'u': if (q[0] && q[1] && q[2] && q[3]) q += 4; c = '?'; break;
+          default:  c = e;
+        }
+      }
+      o[w++] = c;
+    }
+    o[w] = '\0';
+    if (*q == '"') q++;
+    if (w) cnt++;
+  }
+  ck_free(resp);
+
+#ifdef KOFTA_DEBUG
+  kofta_debug("shs_cand,%s,%u\n", (char*)operand, cnt);
+#endif
+
+  return cnt;
+
+}
+
+
 /* Execute target application, monitoring for timeouts. Return status
    information. The called program will update trace_bits[]. */
 
@@ -5738,6 +5942,24 @@ static u8 fuzz_one(char** argv) {
               update_kofta_optlist(kofta_args->optcnt);
               kofta_tntana->mode = KOFTA_TNTANA_MODE_NOP;
               if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+
+              /* SHS: the literal magic string above is ground truth from taint
+                 analysis; ask the LLM for semantically-related argument values
+                 (e.g. sibling format keywords) and try each. Coverage feedback
+                 in the forkserver validates them, so the LLM never judges
+                 correctness -- a useless candidate just costs one fork. */
+              {
+                static arglist shs_cand[KOFTA_SHS_MAX];
+                u32 sc = kofta_shs_candidates(orig_opt, "strcmp",
+                                              kofta_tntana->hints[j].str,
+                                              shs_cand, KOFTA_SHS_MAX);
+                for (u32 c = 0; c < sc; c++) {
+                  strcpy(curr_opt + i, (char*)shs_cand[c]);
+                  update_kofta_optlist(kofta_args->optcnt);
+                  kofta_tntana->mode = KOFTA_TNTANA_MODE_NOP;
+                  if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+                }
+              }
             }
             break;
 
@@ -5850,6 +6072,20 @@ static u8 fuzz_one(char** argv) {
             update_kofta_optlist(kofta_args->optcnt);
             kofta_tntana->mode = KOFTA_TNTANA_MODE_NOP;
             if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+
+            /* SHS augmentation (see opttnt1 for rationale). */
+            {
+              static arglist shs_cand[KOFTA_SHS_MAX];
+              u32 sc = kofta_shs_candidates(orig_opt, "strcmp",
+                                            kofta_tntana->hints[j].str,
+                                            shs_cand, KOFTA_SHS_MAX);
+              for (u32 c = 0; c < sc; c++) {
+                strcpy(curr_opt + i, (char*)shs_cand[c]);
+                update_kofta_optlist(kofta_args->optcnt);
+                kofta_tntana->mode = KOFTA_TNTANA_MODE_NOP;
+                if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+              }
+            }
           }
           break;
 

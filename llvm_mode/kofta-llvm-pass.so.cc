@@ -2,6 +2,7 @@
 
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -19,6 +20,7 @@
 #include <unistd.h>
 
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 #include <map>
 #include <string>
@@ -116,6 +118,21 @@ namespace {
     void sanitizerCovTraceConstCmp(ICmpInst *ICMP, const DominatorTree *DT);
     void sanitizerCovTraceSwitch(SwitchInst *SI);
     void sanitizerCovTraceString(CallInst *CI, Value *Str1, Value *Str2, Value *Len = nullptr);
+
+    // ---- SHS source-context map (gated on $KOFTA_SRCMAP) -------------------
+    // When enabled, each instrumented comparison whose operand the runtime
+    // hint pool can observe (a const int for trace_const_cmp/switch, a string
+    // literal for trace_str) gets a record written to the srcmap file: the
+    // observed operand (the correlation key afl-fuzz uses to find a stuck
+    // branch's source), its file:line, and a +/-k source-line slice captured
+    // here at compile time so it travels with the build, not the fuzzing host.
+    std::ofstream KoftaSrcmap;
+    unsigned SrcCtx = 3;
+    std::map<std::string, std::vector<std::string>> SrcCache;
+
+    void emitSrcmap(Instruction *I, const char *kind, const std::string &operand);
+    const std::vector<std::string> &sourceLines(const std::string &path);
+    static std::string constStr(Value *V);
   };
 
 } // end anonymous namespace
@@ -137,6 +154,14 @@ bool KOFTAAnalysis::runOnModule(Module &M) {
   size_t opt_count = 0;
   std::ofstream kofta_opts;
   kofta_opts.open(kofta_opt_save, std::ios_base::app);
+
+  if (char *srcmap = getenv("KOFTA_SRCMAP")) {
+    KoftaSrcmap.open(srcmap, std::ios_base::app);
+    if (char *ctx = getenv("KOFTA_SRCMAP_CTX")) {
+      int k = atoi(ctx);
+      if (k >= 0) SrcCtx = (unsigned)k;
+    }
+  }
 
   for (Function &F : M) {
     if (F.empty()) continue;
@@ -164,6 +189,7 @@ bool KOFTAAnalysis::runOnModule(Module &M) {
   }
 
   kofta_opts.close();
+  if (KoftaSrcmap.is_open()) KoftaSrcmap.close();
   if (opt_count) {
     OKF("Found %zu options. See %s.", opt_count, kofta_opt_save);
   }
@@ -436,6 +462,10 @@ void KOFTAAnalysis::sanitizerCovTraceConstCmp(ICmpInst *ICMP, const DominatorTre
 
   IRB.CreateCall(CallbackFunc, {A0, A1});
 
+  if (KoftaSrcmap.is_open())
+    if (auto *C = dyn_cast<ConstantInt>(A0))
+      emitSrcmap(ICMP, "cmp", std::to_string(C->getZExtValue()));
+
 }
 
 void KOFTAAnalysis::sanitizerCovTraceSwitch(SwitchInst *SI) {
@@ -466,6 +496,11 @@ void KOFTAAnalysis::sanitizerCovTraceSwitch(SwitchInst *SI) {
       ConstantArray::get(ArrayOfInt64Ty, Initializers),
       "__sancov_gen_cov_switch_values");
   IRB.CreateCall(SanCovFuncTraceSwitch, {Cond, IRB.CreatePointerCast(GV, Int64PtrTy)});
+
+  if (KoftaSrcmap.is_open())
+    for (auto It : SI->cases())
+      emitSrcmap(SI, "switch",
+                 std::to_string(It.getCaseValue()->getZExtValue()));
 
 }
 
@@ -498,6 +533,62 @@ void KOFTAAnalysis::sanitizerCovTraceString(CallInst *CI, Value *Str1, Value *St
   IRBuilder<> IRB(CI);
   IRB.CreateCall(FuncTraceStr, { Cnst, Argv, Len });
 
+  if (KoftaSrcmap.is_open()) {
+    std::string s = constStr(Cnst);
+    if (!s.empty()) emitSrcmap(CI, "str", s);
+  }
+
+}
+
+std::string KOFTAAnalysis::constStr(Value *V) {
+  auto *CE = dyn_cast<ConstantExpr>(V);
+  if (!CE || CE->getOpcode() != Instruction::GetElementPtr) return "";
+  auto *GV = dyn_cast<GlobalVariable>(CE->getOperand(0));
+  if (!GV || !GV->hasInitializer()) return "";
+  auto *CDA = dyn_cast<ConstantDataArray>(GV->getInitializer());
+  if (!CDA || !CDA->isCString()) return "";
+  return CDA->getAsCString().str();
+}
+
+const std::vector<std::string> &KOFTAAnalysis::sourceLines(const std::string &path) {
+  auto it = SrcCache.find(path);
+  if (it != SrcCache.end()) return it->second;
+  std::vector<std::string> &lines = SrcCache[path];
+  std::ifstream ifs(path);
+  for (std::string line; std::getline(ifs, line); )
+    lines.push_back(line);
+  return lines;
+}
+
+void KOFTAAnalysis::emitSrcmap(Instruction *I, const char *kind,
+                               const std::string &operand) {
+  const DebugLoc &DL = I->getDebugLoc();
+  if (!DL) return;
+  DILocation *Loc = DL.get();
+  if (!Loc) return;
+  unsigned line = Loc->getLine();
+  if (!line) return;
+
+  StringRef file = Loc->getFilename();
+  StringRef dir = Loc->getDirectory();
+  std::string path = file.str();
+  if (!file.startswith("/") && !dir.empty())
+    path = dir.str() + "/" + file.str();
+
+  const std::vector<std::string> &lines = sourceLines(path);
+  unsigned lo = line > SrcCtx ? line - SrcCtx : 1;
+  unsigned hi = line + SrcCtx;
+  if (hi > lines.size()) hi = lines.size();
+  unsigned nslice = hi >= lo ? hi - lo + 1 : 0;
+
+  std::string op = operand;
+  for (char &c : op) if (c == '\n' || c == '\r') c = ' ';
+
+  KoftaSrcmap << "@ " << kind << ' ' << nslice << ' ' << line << ' '
+              << path << "\n";
+  KoftaSrcmap << "= " << op << "\n";
+  for (unsigned n = lo; n <= hi && n <= lines.size(); ++n)
+    KoftaSrcmap << "| " << lines[n - 1] << "\n";
 }
 
 static void registerKOFTAPass(const PassManagerBuilder &, legacy::PassManagerBase &PM) {

@@ -1,0 +1,52 @@
+name: build-linux
+
+# Baseline build + instrumentation self-test for the C/LLVM parts of KOFTA.
+# The LLVM passes register via the legacy pass manager (PassManagerBuilder /
+# RegisterStandardPasses), so the toolchain must default to the legacy PM --
+# clang switched the default to the new PM in clang 13, which would silently
+# skip our instrumentation. clang 12 is the newest release that still defaults
+# to the legacy PM and still has the single-arg IRBuilder::CreateLoad(Value*)
+# overload (removed in LLVM 14). Builds afl-fuzz first (top-level make produces
+# afl-showmap, which llvm_mode's test_deps requires), then the llvm_mode
+# instrumentation. This must stay green before any SHS C wiring lands.
+
+on:
+  push:
+    paths:
+      - "**.c"
+      - "**.h"
+      - "llvm_mode/**"
+      - "Makefile"
+      - ".github/workflows/build-linux.yml"
+  pull_request:
+    paths:
+      - "**.c"
+      - "**.h"
+      - "llvm_mode/**"
+      - "Makefile"
+      - ".github/workflows/build-linux.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang/llvm 12
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-12 llvm-12-dev
+
+      - name: Build afl-fuzz and tools (top-level)
+        run: make CC=clang-12
+
+      - name: Build llvm_mode instrumentation
+        run: |
+          make -C llvm_mode \
+            LLVM_CONFIG=llvm-config-12 \
+            CC=clang-12 CXX=clang++-12
+
+      # Compile-check the KOFTA_DEBUG path (SHS observability logging lives
+      # behind #ifdef KOFTA_DEBUG, so the default build above never sees it).
+      - name: Build afl-fuzz with KOFTA_DEBUG
+        run: make clean && make CC=clang-12 KOFTA_DEBUG=1
