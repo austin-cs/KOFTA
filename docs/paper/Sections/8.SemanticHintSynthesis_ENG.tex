@@ -167,29 +167,3 @@ Table~\ref{tab:cost} shows SHS is inexpensive in practice. Because it is trigger
 
 \subsection{Discussion}
 Used as an autonomous configurator (\LLMonly{}), a language model under-explores the input space---consistent with our motivating critique. Used as a grounded, feedback-validated hint source (\KSHS{}), the same model breaks magic-value gates that byte-level taint inference provably cannot, lifting edge coverage by $[Y.Y]\%$ at negligible overhead, while every candidate it proposes is verified by execution so that its hallucinations cost at most one fork. The lesson generalizes beyond fuzzing: program analysis and language models are most effective when the former supplies ground truth and bounds the search, and the latter supplies the semantics that static signals alone cannot recover.
-
-% ============================================================================
-% AUTHOR-FACING NOTES (not rendered). Remove before submission.
-%
-% Integration option: the subsections above can instead be distributed into the
-% existing sections -- Method into Design (Sec. III), Implementation Notes into
-% Sec. IV, and Evaluation into Sec. V -- if you prefer not to add a standalone
-% section. They are bundled here for drop-in convenience.
-%
-% This addition also lets you repair existing gaps while revising:
-%   1. RQ5 supplies the coverage experiment that the conclusion's 39.05% /
-%      16.54% figures currently lack.
-%   2. Apply the >=10-run + Mann-Whitney + A12 protocol retroactively to RQ1/RQ2.
-%   3. KOFTA+SHS\g and LLM-only turn the qualitative anti-LLM argument into
-%      measured evidence.
-% Unrelated data fixes: Table I lists Libxml2's program as "readelf" -- should be
-% "xmllint"; and "7 vulns, 5 confirmed, 3 fixed" does not reconcile with the
-% vulnerability table (3 Duplicate + 3 Fixed + 1 Won't-fix). Re-check wording.
-%
-% Title options (set \paperTitle in the main file):
-%   1. KOFTA: Option-Aware Fuzzing with LLM-Grounded Taint Inference  [safest]
-%   2. Grounding Language Models in Taint Inference for Option-Aware Fuzzing
-%   3. From Bytes to Semantics: LLM-Augmented Taint Inference for Multi-Argument Fuzzing
-%   4. Taint-Grounded Semantic Hint Synthesis for Option-Aware Fuzzing
-%   5. When Taint Inference Meets Language Models: Semantic-Aware Option Fuzzing
-% ============================================================================
