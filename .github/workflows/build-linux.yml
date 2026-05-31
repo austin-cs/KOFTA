@@ -1,10 +1,12 @@
 name: build-linux
 
-# Baseline compile check for the C/LLVM parts of KOFTA. The LLVM pass uses the
-# legacy pass manager (PassManagerBuilder / RegisterStandardPasses), which was
-# removed in LLVM 16, so we pin clang/llvm 14. Builds afl-fuzz first (top-level
-# make produces afl-showmap, which llvm_mode's test_deps requires), then the
-# llvm_mode instrumentation. This must stay green before any SHS C wiring lands.
+# Baseline compile check for the C/LLVM parts of KOFTA. The LLVM passes are
+# written against the legacy pass manager (PassManagerBuilder /
+# RegisterStandardPasses, removed in LLVM 16) and use the single-argument
+# IRBuilder::CreateLoad(Value*) overload (removed in LLVM 14), so LLVM 13 is the
+# newest usable toolchain. Builds afl-fuzz first (top-level make produces
+# afl-showmap, which llvm_mode's test_deps requires), then the llvm_mode
+# instrumentation. This must stay green before any SHS C wiring lands.
 
 on:
   push:
@@ -28,16 +30,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install clang/llvm 14
+      - name: Install clang/llvm 13
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 llvm-14-dev
+          sudo apt-get install -y clang-13 llvm-13-dev
 
       - name: Build afl-fuzz and tools (top-level)
-        run: make CC=clang-14
+        run: make CC=clang-13
 
       - name: Build llvm_mode instrumentation
         run: |
           make -C llvm_mode \
-            LLVM_CONFIG=llvm-config-14 \
-            CC=clang-14 CXX=clang++-14
+            LLVM_CONFIG=llvm-config-13 \
+            CC=clang-13 CXX=clang++-13
