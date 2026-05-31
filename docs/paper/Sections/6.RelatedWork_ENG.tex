@@ -15,6 +15,7 @@
 Our study draws inspiration from SQ-Fuzz's use of multi-argument "combinatorial testing" \cite{wu2020sq} and proposes a more flexible multi-argument fuzz testing architecture.
 
 \subsection{MOZZ}
+\label{subsec:mozz}
 
 %MOZZ \cite{tsai2024Multiple} 提出了一個結合結構式模糊測試（structure-aware fuzzing）與多參數模糊測試的模糊測試架構，旨在解決傳統灰箱模糊測試中忽視輸入結構及多參數組合的問題。並使用人工智慧輔助生成參數組態檔，降低多參數模糊測試的人工需求。MOZZ 作者微調了 OpenAI 模型 \cite{brown2020language}，使其能從程式的使用手冊中自動提取命令列參數，並生成 XML 格式的參數組態檔，減少了多參數測試的手動工作量。
 
@@ -36,6 +37,7 @@ Our study references PATA's methods in taint analysis and branch constraint anal
 
 
 \subsection{AIFORE}
+\label{subsec:aifore}
 
 %AIFORE \cite{shi2023aifore} 提出了一種基於自動化輸入格式逆向工程的模糊測試架構，旨在提升模糊測試的有效性與深度探索能力。該架構的核心方法是自動學習目標程式的輸入檔案格式，並利用這些資訊引導模糊測試過程。AIFORE 的創新點包括輸入位元組的邊界識別、資料格式類型分類。
 

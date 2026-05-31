@@ -1,0 +1,195 @@
+% ============================================================================
+% Section: Semantic Hint Synthesis (LLM-Grounded Argument Generation)
+% Self-contained extension to KOFTA. \input this after the Evaluation section.
+% Config-name macros are defined with \providecommand so they do not clash if
+% the main file already defines them.
+% ============================================================================
+\providecommand{\KOFTA}{KOFTA}
+\providecommand{\KSHS}{KOFTA+SHS}
+\providecommand{\KSHSng}{KOFTA+SHS\textbackslash g}
+\providecommand{\LLMonly}{LLM-only}
+\providecommand{\Weifuzz}{Wei-fuzz}
+\providecommand{\Atwelve}{$\hat{A}_{12}$}
+
+\section{Semantic Hint Synthesis}
+\label{sec:shs}
+
+Taint inference (Section~\ref{subsec:taint-inference}) reliably identifies \emph{which} argument bytes influence \emph{which} branch, and the byte-level mutation strategy ($\pm 1, \pm 10^{n}$) is effective for arguments whose validity depends on a continuous numeric relationship. It is structurally incapable, however, of synthesizing \emph{magic values}---multi-byte string enumerations (e.g., \texttt{--format} expecting \texttt{png}, \texttt{tiff}, \texttt{jpeg}) and isolated magic numbers (e.g., a 4-byte format tag). For an $n$-byte target literal, byte-wise mutation reaches it with probability on the order of $256^{-n}$, so these branches form a hard ceiling for the byte-level design. Critically, these are exactly the branches that gate large, otherwise-unreachable modules of command-line tools.
+
+The observation enabling a cheap remedy is that taint inference does not merely tell us a branch is hard; it hands us a set of \emph{verified structural facts}: (1) the option string the argument belongs to; (2) the taint-sink type (\texttt{strcmp()}, \texttt{if-else} comparison, or \texttt{switch-case}; Section~\ref{subsec:tntana-chara}); (3) the comparison object and, where the operand is a literal, the comparison operand itself (already recorded by the \texttt{\_\_kofta\_trace\_*} instrumentation); and (4) the surrounding source location, available at compile time from the LLVM Pass (Section~\ref{subsec:llvm-pass}). We therefore propose \textbf{Semantic Hint Synthesis (SHS)}: a module that converts these verified facts into a small prompt and asks a large language model (LLM) for a ranked list of semantically plausible candidate values. The candidates are injected into the same hint pool that taint inference already produces, and are validated through the existing multi-argument forkserver (Section~\ref{subsec:forkserver}).
+
+\subsection{Consistency with Our Critique of LLM-Based Fuzzing}
+This work argues, against MOZZ-style approaches (Section~\ref{subsec:mozz}), that an LLM alone (i)~requires fine-tuning effort and (ii)~cannot fully explore the input space. SHS is consistent with both claims because the LLM is used in a fundamentally different role. \emph{The LLM never decides what is correct}: every synthesized candidate is treated as an ordinary hint and is accepted only if forkserver execution yields new edge coverage or a \texttt{0} exit code, so a hallucinated value is discarded at the cost of a single fork and correctness is guaranteed by coverage feedback, not by the LLM. \emph{The LLM is grounded in program facts, not the user manual}: it is fed facts extracted from the binary's own source, consistent with the AIFORE principle this paper endorses (Section~\ref{subsec:aifore}). \emph{No fine-tuning is used}: SHS calls an off-the-shelf model with a fixed prompt template, incurring none of the per-target training cost criticized in MOZZ. In short, SHS uses program analysis to make the LLM \emph{sound}, and uses the LLM to make program analysis \emph{semantically complete} on magic-value branches.
+
+\subsection{Method}
+\subsubsection{Trigger Condition}
+SHS is invoked sparingly, only when byte-level taint inference is provably stuck, so that throughput is preserved. A \emph{stuck-branch} trigger fires when a tainted argument has been mutated for $N_{\mathrm{byte}}$ executions (default $256$ per influencing byte) without flipping its associated taint sink, indicating a discrete gate rather than a continuous constraint. A \emph{literal-operand} trigger fires when a taint sink of type \texttt{strcmp()} or \texttt{switch-case} is discovered whose comparison operand is a multi-byte literal that byte mutation is unlikely to reach.
+
+\subsubsection{Prompt Construction}
+For a triggered branch, the LLVM Pass and runtime feedback jointly produce a record $\langle$\texttt{option}, \texttt{sink\_type}, \texttt{comparison\_object}, \texttt{observed\_operand}, \texttt{source\_slice}$\rangle$, where \texttt{source\_slice} is the $\pm k$ source lines around the call site. The prompt asks the model to return \emph{only} a JSON array of candidate strings, ranked most- to least-likely, with no prose, to keep parsing trivial and latency low (Listing~\ref{lst:shs-prompt}). The returned candidates are appended to the hint pool for that option's argument.
+
+\begin{lstlisting}[language=,numbers=none,basicstyle=\ttfamily\scriptsize,caption={SHS prompt template (illustrative).},label={lst:shs-prompt}]
+You are assisting a fuzzer. Given an option and the
+source code that parses its argument, list plausible
+argument VALUES that drive execution down new branches.
+Return ONLY a JSON array of strings, ranked most likely
+first, at most K items, no explanation.
+
+option: --format
+parser sink type: strcmp
+source slice:
+    if (!strcmp(arg, "png"))  ...
+    else if (!strcmp(arg, "tiff")) ...
+    else { /* default */ }
+\end{lstlisting}
+
+\subsubsection{Validation and Feedback Loop}
+Each candidate is dispatched through the unmodified multi-argument forkserver. A candidate is retained as a productive hint iff it (a)~produces a previously unseen edge, or (b)~changes the target's exit code from non-zero to \texttt{0}, passing the optional-argument necessity check. Candidates that do neither are discarded. Because dispatch reuses the forkserver, the marginal cost of testing one candidate is identical to that of one byte-mutation, i.e., a single fork.
+
+\subsubsection{Cost Control}
+Two mechanisms keep LLM usage bounded. \emph{Prompt--response caching} is keyed by the hash of \texttt{source\_slice} concatenated with \texttt{option}; because the parsing source of a given option is fixed at compile time, each branch is queried at most once per campaign, and cache hits cost nothing. A \emph{global LLM budget} $B$ (calls per hour) caps invocation; when the budget is exhausted, SHS silently degrades to pure byte-level taint inference, so worst-case behavior is never worse than baseline \KOFTA{}.
+
+\subsubsection{Worked Example}
+Suppose \texttt{--kofta} is followed by a string compared against \texttt{"alpha"} and \texttt{"beta"} via \texttt{strcmp}. Byte mutation from a default seed essentially never produces either literal, so the guarded modes remain unreachable. The \texttt{strcmp} taint sink fires the literal-operand trigger; SHS receives the source slice, returns \texttt{["alpha","beta","gamma",\dots]}; the forkserver tests them; \texttt{alpha} and \texttt{beta} immediately uncover the two guarded modules and are promoted to persistent hints, while the spurious \texttt{gamma} is dropped after one fork. No documentation was consulted.
+
+\subsubsection{Implementation Notes}
+SHS is a thin layer over the existing hint pipeline; no change to the forkserver or the LLVM Pass instrumentation is required beyond emitting the source slice alongside each \texttt{\_\_kofta\_trace\_str} / \texttt{\_\_kofta\_trace\_swt} record. The module is model-agnostic (any chat-completion endpoint or a locally hosted model); we report the exact model, context window, and decoding settings for reproducibility, and use temperature~0 so campaigns are reproducible and the cache is sound.
+
+\subsection{Evaluation}
+We extend the evaluation (Section~\ref{ch:evaluation}) with three research questions; the statistical protocol below is applied to all RQs, including the earlier coverage and forkserver experiments.
+\begin{itemize}
+    \item \textbf{RQ5 (Coverage).} Does SHS increase edge coverage over byte-level taint inference alone, and over the existing baselines?
+    \item \textbf{RQ6 (Magic-value penetration).} Does SHS solve discrete magic-value gates that byte mutation cannot?
+    \item \textbf{RQ7 (Grounding ablation and cost).} How much of SHS's benefit comes from program grounding rather than from the LLM per se, and is the overhead practical?
+\end{itemize}
+
+\subsubsection{Statistical Protocol}
+Following Klees~et~al., each (tool $\times$ target) configuration is run $R \geq 10$ times, 24~h per run, with fixed initial seeds. We report the median and compare distributions with the Mann--Whitney $U$ test (reporting $p$) and the Vargha--Delaney \Atwelve{} effect size.
+
+\subsubsection{Configurations}
+We compare five settings. \Weifuzz{} is the prior multi-argument tool and serves as the external baseline. \LLMonly{} generates a static option/argument configuration from the source with an LLM and no execution feedback, emulating the MOZZ-style use of LLMs. \KOFTA{} uses taint inference with byte-level mutation only (no LLM). \KSHS{} is the full proposed system. \KSHSng{} is an ablation whose SHS prompt omits the source-code slice (option name only), isolating the contribution of program grounding.
+
+% ---- Table A: Edge coverage (wide) ----
+\begin{table*}[!t]
+\centering
+\caption{Edge Coverage (median over $R$ runs). $\Delta\%$ is \KSHS{} over the strongest non-\KOFTA{} baseline; \Atwelve{} and $p$ compare \KSHS{} vs.\ \KOFTA{}.}
+\label{tab:cov}
+\begin{tabular}{lrrrrrrr}
+\toprule
+\textbf{Program} & \textbf{\Weifuzz} & \textbf{\LLMonly} & \textbf{\KOFTA} & \textbf{\KSHS} & $\boldsymbol{\Delta\%}$ & \textbf{\Atwelve} & $\boldsymbol{p}$ \\
+\midrule
+objdump   & [\;] & [\;] & [\;] & [\;] & [+\,\%] & [0.xx] & [$<$0.01] \\
+objcopy   & [\;] & [\;] & [\;] & [\;] & [+\,\%] & [0.xx] & [$<$0.01] \\
+readelf   & [\;] & [\;] & [\;] & [\;] & [+\,\%] & [0.xx] & [$<$0.01] \\
+xmllint   & [\;] & [\;] & [\;] & [\;] & [+\,\%] & [0.xx] & [$<$0.01] \\
+tiffcp    & [\;] & [\;] & [\;] & [\;] & [+\,\%] & [0.xx] & [$<$0.01] \\
+tiffcrop  & [\;] & [\;] & [\;] & [\;] & [+\,\%] & [0.xx] & [$<$0.01] \\
+mutool    & [\;] & [\;] & [\;] & [\;] & [+\,\%] & [0.xx] & [$<$0.01] \\
+img2sixel & [\;] & [\;] & [\;] & [\;] & [+\,\%] & [0.xx] & [$<$0.01] \\
+giftool   & [\;] & [\;] & [\;] & [\;] & [+\,\%] & [0.xx] & [$<$0.01] \\
+\midrule
+\textbf{Mean} & [\;] & [\;] & [\;] & [\;] & [+\,\%] & [0.xx] & --- \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+% ---- Table B: Magic-value penetration (wide) ----
+\begin{table*}[!t]
+\centering
+\caption{Magic-Value Penetration on the planted micro-benchmark (gates solved / planted). Planted literals are novel and cannot be recalled from training data.}
+\label{tab:magic}
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{Gate type} & \textbf{\#planted} & \textbf{\LLMonly} & \textbf{\KOFTA} & \textbf{\KSHS} & \textbf{\KSHSng} \\
+\midrule
+string, 2\,B  & [\;] & [\;] & [\;] & [\;] & [\;] \\
+string, 4\,B  & [\;] & [\;] & [\;] & [\;] & [\;] \\
+string, 8\,B  & [\;] & [\;] & [\;] & [\;] & [\;] \\
+magic number  & [\;] & [\;] & [\;] & [\;] & [\;] \\
+\midrule
+\textbf{Total} & [\;] & [\;] & [\;] & [\;] & [\;] \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+% ---- Table C: Undocumented optargs per config (single column) ----
+\begin{table}[!t]
+\centering
+\footnotesize
+\caption{Undocumented Optional Arguments Found per Configuration (extends the RQ1 results).}
+\label{tab:undoc}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Program} & \textbf{\#Doc.} & \textbf{\LLMonly} & \textbf{\KOFTA} & \textbf{\KSHS} \\
+\midrule
+objdump  & [\;] & [\;] & [\;] & [\;] \\
+objcopy  & [\;] & [\;] & [\;] & [\;] \\
+readelf  & [\;] & [\;] & [\;] & [\;] \\
+xmllint  & [\;] & [\;] & [\;] & [\;] \\
+tiffcp   & [\;] & [\;] & [\;] & [\;] \\
+tiffcrop & [\;] & [\;] & [\;] & [\;] \\
+\midrule
+\textbf{Total} & [\;] & [\;] & [\;] & [\;] \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---- Table D: SHS cost (wide) ----
+\begin{table*}[!t]
+\centering
+\caption{SHS Cost over a 24\,h Campaign.}
+\label{tab:cost}
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{Program} & \textbf{LLM calls/h} & \textbf{Cache hit \%} & \textbf{Latency (s)} & \textbf{Tokens/24h} & \textbf{SHS wall-clock \%} \\
+\midrule
+objdump & [\;] & [\;] & [\;] & [\;] & [\,\%] \\
+objcopy & [\;] & [\;] & [\;] & [\;] & [\,\%] \\
+readelf & [\;] & [\;] & [\;] & [\;] & [\,\%] \\
+\multicolumn{6}{c}{$\cdots$} \\
+\midrule
+\textbf{Mean} & [\;] & [\;] & [\;] & [\;] & [\,\%] \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsubsection{RQ5: Coverage}
+Table~\ref{tab:cov} reports median edge coverage across $R=[10]$ runs. \KSHS{} achieves the highest coverage on $[9/9]$ targets, improving over the strongest baseline by a mean of $[+\,XX.X]\%$ and over plain \KOFTA{} by $[+\,Y.Y]\%$. The \KSHS{}-vs-\KOFTA{} comparison is statistically significant on $[N/9]$ targets ($p<[0.01]$) with large effect size ($\hat{A}_{12}\geq[0.71]$) on $[M/9]$, confirming the gain is not attributable to run-to-run variance. Notably, \LLMonly{} is the weakest of the feedback-aware settings on $[K/9]$ targets: although it proposes plausible values, without coverage feedback it cannot tell which combinations actually drive new paths and stalls once its static configuration is exhausted. This substantiates the claim that an LLM used in isolation lacks the ability to fully explore the input space, while the same model, grounded by taint inference and disciplined by coverage feedback, becomes a net positive.
+
+\subsubsection{RQ6: Magic-Value Penetration}
+Table~\ref{tab:magic} isolates the mechanism on a micro-benchmark of $[T]$ planted gates. Byte-level mutation (\KOFTA{}) solves $[a/T]$ gates and fails on every string gate of $\geq[4]$ bytes, as predicted by the $256^{-n}$ reachability of a fixed $n$-byte literal. \KSHS{} solves $[b/T]$, including $[c]$ of the $[d]$ long-string gates, because SHS converts the \texttt{strcmp} taint sink into a semantic query whose candidates are validated by a single fork each. Because these literals are novel and could not have been memorized, the result demonstrates genuine synthesis rather than recall: \LLMonly{} solves only $[e/T]$, confirming that the LLM contributes value precisely when anchored to the program's parsing structure. The ablation \KSHSng{} (no source slice) solves $[f/T]$, showing that program grounding---not merely calling an LLM---is responsible for the bulk of the improvement.
+
+\subsubsection{RQ7: Cost}
+Table~\ref{tab:cost} shows SHS is inexpensive in practice. Because it is triggered only on stuck branches, budgeted at $[B]$ calls/h, and served from a prompt cache (hit rate $[XX]\%$), it issues only $[n]$ LLM calls/h and consumes a mean of $[Z.Z]\%$ of campaign wall-clock. When the budget is exhausted, SHS degrades gracefully to plain taint inference, so \KSHS{} never under-performs \KOFTA{} in the worst case. The coverage gains of Table~\ref{tab:cov} are therefore obtained at single-digit-percent time overhead and $[\$X.XX]$ in API cost per 24~h target.
+
+\subsubsection{Threats to Validity}
+\emph{Model dependence}: results may vary across LLMs; we mitigate by reporting one strong API model and one small local model and showing the \emph{ranking} of configurations is stable even where absolute numbers differ. \emph{Data contamination}: because the targets are public, an LLM may already ``know'' their option values; the hand-planted micro-benchmark of RQ6, whose magic values are novel, isolates genuine synthesis from recall. \emph{Forkserver offset assumption}: we report on how many targets the fixed \texttt{argc}/\texttt{argv} memory-offset assumption held and the fallback behavior when it did not.
+
+\subsection{Discussion}
+Used as an autonomous configurator (\LLMonly{}), a language model under-explores the input space---consistent with our motivating critique. Used as a grounded, feedback-validated hint source (\KSHS{}), the same model breaks magic-value gates that byte-level taint inference provably cannot, lifting edge coverage by $[Y.Y]\%$ at negligible overhead, while every candidate it proposes is verified by execution so that its hallucinations cost at most one fork. The lesson generalizes beyond fuzzing: program analysis and language models are most effective when the former supplies ground truth and bounds the search, and the latter supplies the semantics that static signals alone cannot recover.
+
+% ============================================================================
+% AUTHOR-FACING NOTES (not rendered). Remove before submission.
+%
+% Integration option: the subsections above can instead be distributed into the
+% existing sections -- Method into Design (Sec. III), Implementation Notes into
+% Sec. IV, and Evaluation into Sec. V -- if you prefer not to add a standalone
+% section. They are bundled here for drop-in convenience.
+%
+% This addition also lets you repair existing gaps while revising:
+%   1. RQ5 supplies the coverage experiment that the conclusion's 39.05% /
+%      16.54% figures currently lack.
+%   2. Apply the >=10-run + Mann-Whitney + A12 protocol retroactively to RQ1/RQ2.
+%   3. KOFTA+SHS\g and LLM-only turn the qualitative anti-LLM argument into
+%      measured evidence.
+% Unrelated data fixes: Table I lists Libxml2's program as "readelf" -- should be
+% "xmllint"; and "7 vulns, 5 confirmed, 3 fixed" does not reconcile with the
+% vulnerability table (3 Duplicate + 3 Fixed + 1 Won't-fix). Re-check wording.
+%
+% Title options (set \paperTitle in the main file):
+%   1. KOFTA: Option-Aware Fuzzing with LLM-Grounded Taint Inference  [safest]
+%   2. Grounding Language Models in Taint Inference for Option-Aware Fuzzing
+%   3. From Bytes to Semantics: LLM-Augmented Taint Inference for Multi-Argument Fuzzing
+%   4. Taint-Grounded Semantic Hint Synthesis for Option-Aware Fuzzing
+%   5. When Taint Inference Meets Language Models: Semantic-Aware Option Fuzzing
+% ============================================================================

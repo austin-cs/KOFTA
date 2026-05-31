@@ -204,6 +204,7 @@ Compared to options, optional arguments lack obvious characteristics and usually
 %In past studies on taint inference and fuzzing, all uncertain results were discarded in order to ensure analytical accuracy (which is detrimental to the exploration of optional arguments). Therefore, this study proposes a compromise method based on hashing, sacrificing some inference accuracy to improve the ability to explore optional arguments.
 
 \subsubsection{Taint Inference} %污染源推論
+\label{subsec:taint-inference}
 
 %用於分析資料流，推論外部的輸入是否能夠影響程式執行時內部的記憶體。
 Used to analyze data flows and infer whether external inputs can affect the internal memory during program execution.
@@ -376,6 +377,7 @@ Consider the following execution path -- a linked list (Figure \ref{fig:tntana-d
 After the taint sink group ends, we can compare whether the next node is the same as the corresponding node in the original linked list. If the nodes are the same, it can be considered that although the comparison condition operand of the previously tainted node has changed, it has not visited different branches. Since it is still on the same execution path, we can continue to compare whether the nodes in the two linked lists are the same. At this point, a divergence is found in the node circled in blue, so it is regarded as a new taint sink group, and its characteristic value is recorded and compared with the subsequent nodes.
 
 \subsection{Multi-Argument Forkserver}
+\label{subsec:forkserver}
 
 \iffalse
 除了「評估選項參數必要性」外，「探索選項參數」的方法也是建立於「污染源推論」上。「污染源推論」的原理是：觀察一個選項帶有不同的選項參數時，執行路徑上污染終點的狀態是否發生改變。由此可見，目標程式的命令列參數需由 forkserver 經常改變。若是每次「參數改變」都需要暫時關閉 forkserver，使用 exec 系統呼叫的額外成本將會相當可觀。因此，AFL的 forkserver 必須改良成：在不關閉的情況下，也能更換目標程式的命令列參數。
