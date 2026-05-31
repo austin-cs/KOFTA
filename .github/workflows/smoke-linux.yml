@@ -1,0 +1,55 @@
+name: smoke-linux
+
+# Runtime smoke test for the SHS C seam. Unlike build-linux (compile-only), this
+# actually runs a short kofta-fuzz campaign and asserts the seam fires at
+# runtime: afl-fuzz launches the `kofta-shs serve` co-process, streams NDJSON,
+# and gets candidates back (a "shs_cand,..." line in the KOFTA_DEBUG log).
+#
+# GitHub's ubuntu-22.04 runner is native x86_64 + ships clang-12, which is
+# exactly what docker/run-smoke.sh's container emulates -- so we run the script
+# directly here (no Docker), pointing it at the checkout via SMOKE_BUILD. This
+# is the only place the runtime path is exercised end-to-end; the local
+# docker/smoke.sh wrapper is for developers on an x86_64 host.
+
+on:
+  push:
+    paths:
+      - "**.c"
+      - "**.h"
+      - "llvm_mode/**"
+      - "Makefile"
+      - "docker/**"
+      - "kofta-shs"
+      - "shs/**"
+      - ".github/workflows/smoke-linux.yml"
+  pull_request:
+    paths:
+      - "**.c"
+      - "**.h"
+      - "llvm_mode/**"
+      - "Makefile"
+      - "docker/**"
+      - "kofta-shs"
+      - "shs/**"
+      - ".github/workflows/smoke-linux.yml"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang/llvm 12
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-12 llvm-12-dev
+
+      # Build in place (SMOKE_BUILD == checkout), scratch in the runner temp.
+      # The script asserts a "shs_cand" line and exits non-zero if the seam
+      # never fired, so a green job means the serve co-process really ran.
+      - name: Run SHS runtime smoke test
+        run: |
+          SMOKE_REPO="$GITHUB_WORKSPACE" \
+          SMOKE_BUILD="$GITHUB_WORKSPACE" \
+          SMOKE_WORK="$RUNNER_TEMP/smoke-work" \
+            bash docker/run-smoke.sh
