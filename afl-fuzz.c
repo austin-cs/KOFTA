@@ -2804,6 +2804,10 @@ static u32 kofta_shs_candidates(u8* option, const char* sink_type,
   }
   ck_free(resp);
 
+#ifdef KOFTA_DEBUG
+  kofta_debug("shs_cand,%s,%u\n", (char*)operand, cnt);
+#endif
+
   return cnt;
 
 }

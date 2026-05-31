@@ -45,3 +45,8 @@ jobs:
           make -C llvm_mode \
             LLVM_CONFIG=llvm-config-12 \
             CC=clang-12 CXX=clang++-12
+
+      # Compile-check the KOFTA_DEBUG path (SHS observability logging lives
+      # behind #ifdef KOFTA_DEBUG, so the default build above never sees it).
+      - name: Build afl-fuzz with KOFTA_DEBUG
+        run: make clean && make CC=clang-12 KOFTA_DEBUG=1
