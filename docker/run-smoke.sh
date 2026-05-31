@@ -19,8 +19,10 @@ cp -r "$REPO" "$BUILD"
 cd "$BUILD"
 
 echo "==> building afl-fuzz (KOFTA_DEBUG=1)"
+# AFL_NO_X86 skips the legacy GCC-mode x86 assembly self-test; the container is
+# arm64 and we only use the arch-independent llvm_mode (afl-clang-fast) path.
 make clean >/dev/null
-make CC=clang-12 KOFTA_DEBUG=1
+AFL_NO_X86=1 make CC=clang-12 KOFTA_DEBUG=1
 
 echo "==> building llvm_mode instrumentation"
 make -C llvm_mode LLVM_CONFIG=llvm-config-12 CC=clang-12 CXX=clang++-12
@@ -49,17 +51,33 @@ AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 \
 PYTHONPATH="$BUILD" \
 KOFTA_SRCMAP="$WORK/srcmap.txt" \
 KOFTA_SHS="python3 $BUILD/kofta-shs query --mock --cache $WORK/cache.json" \
-  timeout 60 "$BUILD/kofta-fuzz" -i "$WORK/in" -o "$WORK/out" \
-    -k "$WORK/opts.txt" -- "$WORK/smoke" >/dev/null 2>&1
+  timeout 180 "$BUILD/kofta-fuzz" -i "$WORK/in" -o "$WORK/out" \
+    -m none -t 5000 \
+    -k "$WORK/opts.txt" -- "$WORK/smoke" >"$WORK/fuzz.log" 2>&1
+rc=$?
 set -e
 
-echo "==> SHS query log (KOFTA_DEBUG):"
-grep "shs_cand" "$WORK/KOFTA_DEBUG" || true
+echo "==> kofta-fuzz exit code: $rc (124 = timed out = ran full duration)"
+echo "----- kofta-fuzz output (full) ------------------------------------"
+cat "$WORK/fuzz.log" 2>/dev/null || echo "  (fuzz.log missing)"
+echo "----- /work/out contents ------------------------------------------"
+ls -la "$WORK/out" 2>/dev/null || echo "  (no out dir)"
+
+echo "==> SHS-related KOFTA_DEBUG lines (shs_init / shs_call / shs_cand):"
+grep -E "shs_init|shs_call|shs_cand|shs_noslice" "$WORK/KOFTA_DEBUG" 2>/dev/null || \
+  echo "  (none -- the STR-hint block was never reached)"
 
 if grep -q "shs_cand" "$WORK/KOFTA_DEBUG" 2>/dev/null; then
   echo "==> PASS: SHS C seam fired (kofta-shs queried, candidates returned)"
 else
   echo "==> FAIL: no shs_cand lines -- the SHS C seam never fired" >&2
+  echo "----- diagnostics -------------------------------------------------" >&2
+  echo "[fuzzer_stats]" >&2
+  cat "$WORK/out/fuzzer_stats" 2>/dev/null | grep -E "execs_done|execs_per_sec|cycles_done|paths_total" >&2 || true
+  echo "[KOFTA_DEBUG tail]" >&2
+  tail -n 20 "$WORK/KOFTA_DEBUG" 2>/dev/null >&2 || echo "  (no KOFTA_DEBUG file)" >&2
+  echo "[fuzz.log tail]" >&2
+  tail -n 25 "$WORK/fuzz.log" 2>/dev/null >&2 || true
   exit 1
 fi
 

@@ -2636,6 +2636,9 @@ static void kofta_shs_init(void) {
   kofta_shs_ready = 1;
 
   kofta_shs_cmd = (u8*)getenv("KOFTA_SHS");
+#ifdef KOFTA_DEBUG
+  kofta_debug("shs_init,cmd=%s\n", kofta_shs_cmd ? (char*)kofta_shs_cmd : "(null)");
+#endif
   if (!kofta_shs_cmd) return;
 
   u8* path = (u8*)getenv("KOFTA_SRCMAP");
@@ -2735,10 +2738,20 @@ static u32 kofta_shs_candidates(u8* option, const char* sink_type,
                                 u8* operand, arglist* out, u32 max) {
 
   if (!kofta_shs_ready) kofta_shs_init();
+
+#ifdef KOFTA_DEBUG
+  kofta_debug("shs_call,%s,cmd=%d\n", (char*)operand, kofta_shs_cmd ? 1 : 0);
+#endif
+
   if (!kofta_shs_cmd) return 0;
 
   u8* slice = kofta_srcmap_lookup(operand);
-  if (!slice) return 0;
+  if (!slice) {
+#ifdef KOFTA_DEBUG
+    kofta_debug("shs_noslice,%s\n", (char*)operand);
+#endif
+    return 0;
+  }
 
   u32 jl   = 0;
   u8* json = ck_alloc(1);
