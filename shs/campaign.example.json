@@ -1,0 +1,23 @@
+{
+  "_comment": "Example SHS campaign spec. Copy, then fill in REAL binary paths, seeds, and flags for your machine. Template vars substituted by the orchestrator: {target} {out} {duration} {run} {cache} {cost}. Edit the commands to match how YOU invoke KOFTA / Wei-fuzz; the values below are illustrative, not verified invocations.",
+
+  "root": "~/kofta-shs-campaign",
+  "targets": ["objdump", "objcopy", "readelf", "xmllint", "tiffcp", "tiffcrop", "mutool", "img2sixel", "giftool"],
+  "runs": 10,
+  "duration_s": 86400,
+
+  "env": {
+    "AFL_NO_UI": "1"
+  },
+
+  "commands": {
+    "weifuzz":  "timeout {duration} wei-fuzz -i seeds/{target} -o {out} -x params/{target}.xml -- bin/{target} @@",
+    "llmonly":  "kofta-llmconfig --source src/{target} --out {out}/params.xml && timeout {duration} wei-fuzz -i seeds/{target} -o {out} -x {out}/params.xml -- bin/{target} @@",
+    "kofta":    "timeout {duration} env KOFTA_SHS_BUDGET=0 ./afl-fuzz -i seeds/{target} -o {out} -- bin/{target}.kofta @@",
+    "kshs":     "timeout {duration} env KOFTA_SHS=1 KOFTA_SHS_BUDGET=60 KOFTA_SHS_MODEL=claude-haiku-4-5-20251001 KOFTA_SHS_CACHE={cache} KOFTA_SHS_COST={cost} ./afl-fuzz -i seeds/{target} -o {out} -- bin/{target}.kofta @@",
+    "kshsng":   "timeout {duration} env KOFTA_SHS=1 KOFTA_SHS_NOSLICE=1 KOFTA_SHS_BUDGET=60 KOFTA_SHS_MODEL=claude-haiku-4-5-20251001 KOFTA_SHS_CACHE={cache} KOFTA_SHS_COST={cost} ./afl-fuzz -i seeds/{target} -o {out} -- bin/{target}.kofta @@"
+  },
+
+  "showmap": "./afl-showmap -q -m none -o {output} -- bin/{target}.kofta {input}",
+  "opts_cmd": "./kofta-opts {out} -c -d {state} -q"
+}

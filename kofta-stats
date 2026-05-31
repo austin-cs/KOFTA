@@ -1,0 +1,104 @@
+#!python3
+# -*- coding: utf-8 -*-
+"""Compute SHS evaluation tables from a real KOFTA campaign.
+
+Reads run artifacts under a campaign root and prints LaTeX rows that replace the
+[\\;] placeholders in Sections/8.SemanticHintSynthesis_ENG.tex, plus a "prose
+facts" block for the RQ5-RQ7 narrative placeholders ([10], [N/9], [+XX.X]%, ...).
+
+Cells with no run data stay as [\\;], so a partial campaign yields an honest,
+compilable, incomplete table -- numbers are never invented.
+
+  ./kofta-stats <campaign_root>                 # all tables, metric=edges
+  ./kofta-stats <campaign_root> --metric paths  # use plot_data path count
+  ./kofta-stats <campaign_root> --table cov     # one table only
+"""
+
+import argparse
+from pathlib import Path
+
+from debug import phello, pok, psay, pwarn
+from shs import tables
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("root", metavar="CAMPAIGN_ROOT", type=Path,
+                   help="campaign directory (see shs/loaders.py for layout)")
+    p.add_argument("--metric", choices=["edges", "paths"], default="edges",
+                   help="coverage metric for tab:cov (default: edges)")
+    p.add_argument("--table", choices=["cov", "magic", "undoc", "cost", "all"],
+                   default="all", help="which table to emit (default: all)")
+    return p.parse_args()
+
+
+def _emit(label: str, ref: str, rows: list[str]) -> None:
+    psay(f"% ==== {label}  ->  replace the [\\;] rows in {ref} ====")
+    for r in rows:
+        psay(r)
+    psay("")
+
+
+def _facts_cov(f: dict) -> None:
+    if not f["n_targets"]:
+        return
+    psay("% ---- RQ5 prose facts ----")
+    psay(f"% R (runs/config)            = {f['R']}")
+    psay(f"% targets compared           = {f['n_targets']}")
+    psay(f"% KSHS highest coverage on   = {f['kshs_wins']}/{f['n_targets']}")
+    psay(f"% significant (p<0.01) on    = {f['sig_targets']}/{f['n_targets']}")
+    psay(f"% large effect (A12>=0.71)   = {f['large_effect']}/{f['n_targets']}")
+    if f["deltas"]:
+        psay(f"% mean Delta% vs best baseline = +{sum(f['deltas'])/len(f['deltas']):.1f}%")
+    if f["delta_vs_kofta"]:
+        d = f["delta_vs_kofta"]
+        psay(f"% mean Delta% vs plain KOFTA   = +{sum(d)/len(d):.1f}%")
+    psay("")
+
+
+def _facts_magic(f: dict) -> None:
+    if not f.get("by_config"):
+        return
+    psay("% ---- RQ6 prose facts ----")
+    psay(f"% planted total (T)          = {f.get('total_planted')}")
+    for c, n in f["by_config"].items():
+        psay(f"% {c:<10} solved           = {n}/{f.get('total_planted')}")
+    psay("")
+
+
+def main() -> None:
+    phello("kofta-stats")
+    args = parse_args()
+    root: Path = args.root
+    if not root.is_dir():
+        pwarn(f"campaign root {root} does not exist; every cell will be [\\;]")
+
+    if args.metric == "edges":
+        pok("metric=edges (afl-showmap edges.txt; falls back to plot_data paths)")
+    else:
+        pok("metric=paths (plot_data paths_total -- a queue-size proxy)")
+    psay("")
+
+    if args.table in ("cov", "all"):
+        rows, f = tables.table_cov(root, args.metric)
+        _emit("Table A: Edge Coverage (tab:cov)",
+              "8.SemanticHintSynthesis_ENG.tex", rows)
+        _facts_cov(f)
+    if args.table in ("magic", "all"):
+        rows, f = tables.table_magic(root)
+        _emit("Table B: Magic-Value Penetration (tab:magic)",
+              "8.SemanticHintSynthesis_ENG.tex", rows)
+        _facts_magic(f)
+    if args.table in ("undoc", "all"):
+        rows, _ = tables.table_undoc(root)
+        _emit("Table C: Undocumented Optargs (tab:undoc)",
+              "8.SemanticHintSynthesis_ENG.tex", rows)
+    if args.table in ("cost", "all"):
+        rows, _ = tables.table_cost(root)
+        _emit("Table D: SHS Cost (tab:cost)",
+              "8.SemanticHintSynthesis_ENG.tex", rows)
+
+
+if __name__ == "__main__":
+    main()
