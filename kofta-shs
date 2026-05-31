@@ -1,0 +1,75 @@
+#!python3
+# -*- coding: utf-8 -*-
+"""Semantic Hint Synthesis query endpoint -- the seam between afl-fuzz.c and the
+LLM. KOFTA calls this when a branch is stuck on a magic value; it returns ranked
+candidate argument values to inject into the hint pool. Validation stays in the
+forkserver: a bad candidate just wastes one fork.
+
+  echo '{"option":"--format","sink_type":"strcmp",
+         "source_slice":"if(!strcmp(arg,\"png\"))...\nelse if(!strcmp(arg,\"tiff\"))..."}' \
+    | ./kofta-shs query --model claude-haiku-4-5-20251001 --cache wd/shs/cache.json
+
+  # offline (no API), deterministic, for tests / CI:
+  ... | ./kofta-shs query --mock
+
+Output: a JSON array of candidate strings on stdout (empty array if the budget
+is exhausted or the reply was unparseable). One record per invocation; for many
+queries prefer --serve (newline-delimited JSON requests on stdin).
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+from shs.service import (BranchRecord, Budget, Cache, Cost, SHSService,
+                         make_client)
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("mode", choices=["query", "serve"],
+                   help="query: one record on stdin; serve: NDJSON stream")
+    p.add_argument("--model", default=None,
+                   help="chat-completion model id (omit or --mock for offline)")
+    p.add_argument("--mock", action="store_true",
+                   help="deterministic offline client (no API, no cost)")
+    p.add_argument("--cache", type=Path, default=Path("shs_cache.json"),
+                   help="persistent prompt->candidates cache file")
+    p.add_argument("--budget", type=int, default=60,
+                   help="max real LLM calls per hour (0 disables SHS)")
+    p.add_argument("-k", type=int, default=8, help="max candidates per branch")
+    p.add_argument("--cost-out", type=Path, default=None,
+                   help="write shs_cost.json here on exit (for tab:cost)")
+    return p.parse_args()
+
+
+def build_service(args) -> SHSService:
+    client = make_client(args.model, args.mock)
+    return SHSService(client, Cache(args.cache), Budget(args.budget),
+                      k=args.k, cost=Cost())
+
+
+def main() -> None:
+    args = parse_args()
+    svc = build_service(args)
+
+    if args.mode == "query":
+        rec = BranchRecord.from_dict(json.loads(sys.stdin.read()))
+        print(json.dumps(svc.query(rec)))
+    else:  # serve
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            rec = BranchRecord.from_dict(json.loads(line))
+            sys.stdout.write(json.dumps(svc.query(rec)) + "\n")
+            sys.stdout.flush()
+
+    if args.cost_out:
+        svc.cost.dump(args.cost_out)
+
+
+if __name__ == "__main__":
+    main()

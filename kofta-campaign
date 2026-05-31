@@ -1,0 +1,50 @@
+#!python3
+# -*- coding: utf-8 -*-
+"""Run the SHS evaluation campaign (RQ5-RQ7 matrix) from a spec file.
+
+  ./kofta-campaign shs/campaign.example.json --dry-run   # print the plan + commands
+  ./kofta-campaign my_campaign.json                       # actually run it
+  ./kofta-campaign my_campaign.json --only kshs,kofta     # subset of configs
+  ./kofta-campaign my_campaign.json --targets objdump     # subset of targets
+
+The spec defines per-config command templates ({target} {out} {duration}
+{cache} {cost} are substituted). Completed runs are marked with .shs_done and
+skipped on re-run, so an interrupted campaign resumes. See campaign.example.json.
+"""
+
+import argparse
+from pathlib import Path
+
+from debug import phello, pfatal
+from shs import campaign
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("spec", type=Path, help="campaign spec JSON")
+    p.add_argument("--dry-run", action="store_true",
+                   help="print the plan and resolved commands without running")
+    p.add_argument("--only", default=None,
+                   help="comma-separated config subset (weifuzz,llmonly,kofta,kshs,kshsng)")
+    p.add_argument("--targets", default=None,
+                   help="comma-separated target subset")
+    return p.parse_args()
+
+
+def main() -> None:
+    phello("kofta-campaign")
+    args = parse_args()
+    if not args.spec.is_file():
+        pfatal(f"spec not found: {args.spec}")
+    spec = campaign.Spec.load(args.spec)
+    if args.only:
+        keep = set(args.only.split(","))
+        spec.commands = {k: v for k, v in spec.commands.items() if k in keep}
+    if args.targets:
+        spec.targets = args.targets.split(",")
+    campaign.run_campaign(spec, dry=args.dry_run)
+
+
+if __name__ == "__main__":
+    main()
