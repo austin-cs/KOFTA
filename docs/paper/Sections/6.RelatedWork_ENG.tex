@@ -1,0 +1,47 @@
+\section{RELATED WORK}
+\label{ch:relatedwork}
+
+\iftrue
+
+\subsection{SQ-Fuzz}
+
+%SQ-Fuzz \cite{wu2020sq} 是一種將模糊測試與組合測試 \cite{nie2011survey} 相結合的測試架構，旨在克服現有模糊測試技術在多維度輸入空間探索中的限制。設計了一種易於使用的設定檔格式，用以定義目標程式中所有可能影響執行的命令列參數，是生成測試組合的基礎。
+
+%SQ-Fuzz 融合組合測試的概念，解決了傳統模糊測試工具難以有效處理多個維度輸入的問題，尤其在參數空間巨大且相互依賴性強的場景下效果顯著。通過分支覆蓋率回饋機制，SQ-Fuzz 能自動分析參數間隱含的互斥關係，淘汰不必要的測試組合，降低人工干預需求。
+
+%在多個開源軟體（如 GNU binutils）上進行測試，SQ-Fuzz 相較於 AFL 和 AFLfast 等工具，平均分支覆蓋率提升 40\%，並發現了 17 個新的程式錯誤，其中多數是由多參數交互作用導致。
+
+%本研究參考了 SQ-Fuzz 使用多參數之「組合測試」的精神 \cite{wu2020sq}，提出了一種更有彈性的多參數模糊測試架構。
+Our study draws inspiration from SQ-Fuzz's use of multi-argument "combinatorial testing" \cite{wu2020sq} and proposes a more flexible multi-argument fuzz testing architecture.
+
+\subsection{MOZZ}
+
+%MOZZ \cite{tsai2024Multiple} 提出了一個結合結構式模糊測試（structure-aware fuzzing）與多參數模糊測試的模糊測試架構，旨在解決傳統灰箱模糊測試中忽視輸入結構及多參數組合的問題。並使用人工智慧輔助生成參數組態檔，降低多參數模糊測試的人工需求。MOZZ 作者微調了 OpenAI 模型 \cite{brown2020language}，使其能從程式的使用手冊中自動提取命令列參數，並生成 XML 格式的參數組態檔，減少了多參數測試的手動工作量。
+
+%實驗結果顯示，與 AFL 和 AFLSMART 相比，該方法平均提升了 61.13\% 的程式覆蓋率。此外，在測試的過程中發現了 23 個新漏洞，其中 4 個被分配了 CVE 編號。
+
+%本研究參考了 MOZZ 想要降低多參數測試的人工需求 \cite{tsai2024Multiple}，並用更加全自動的方法找出可以使用的參數。
+Our study references MOZZ's aim \cite{tsai2024Multiple} to reduce the manual requirements of multi-argument testing and uses a more fully automated method to identify usable parameters.
+
+\subsection{PATA}
+
+%PATA \cite{liang2022pata}（Path-Aware Taint Analysis，路徑感知汙染源分析）是一種結合汙染源分析與模糊測試的架構，旨在提升現有模糊測試工具在處理複雜程式邏輯上的能力。傳統的汙染源分析容易因為過度汙染（over-tainting）或不足汙染（under-tainting）而導致分析準確性下降，進而限制測試的有效性。PATA 通過路徑感知的汙染源分析方法，克服了這一問題，顯著提高了測試的覆蓋率與漏洞挖掘效率。
+
+%PATA 引入了代表變數序列（Representative Variable Sequence, RVS）的概念，記錄執行路徑上的條件變數及其多次出現的情況，推論並追溯會影響這些條件的關鍵位元組。基於這些分析結果，PATA 設計了一種路徑導向的變異策略，針對未覆蓋的分支進行高效的種子生成，以探索更多潛在的程式狀態。
+
+%PATA 在路徑發現數量上相比其他主流模糊測試工具（如 AFL、Angora、GREYONE 等）提升了 29\% 至 1830\%，在基本區塊覆蓋數量上提升了 7\% 至 87\%。更重要的是，PATA 在實驗中發現了多個未列入的漏洞，其中包括 17 個新的漏洞及 12 個 CVE 漏洞。此外，PATA 在處理多次出現的條件變數和迴圈時表現出色，克服了傳統汙染源分析方法在這些情況下的局限。
+
+%本研究參考 PATA 在汙染源分析、分支約束條件分析的方法 \cite{liang2022pata}。
+Our study references PATA's methods in taint analysis and branch constraint analysis \cite{liang2022pata}.
+
+
+\subsection{AIFORE}
+
+%AIFORE \cite{shi2023aifore} 提出了一種基於自動化輸入格式逆向工程的模糊測試架構，旨在提升模糊測試的有效性與深度探索能力。該架構的核心方法是自動學習目標程式的輸入檔案格式，並利用這些資訊引導模糊測試過程。AIFORE 的創新點包括輸入位元組的邊界識別、資料格式類型分類。
+
+%AIFORE 採用了污染源分析技術，將輸入位元組與程式執行的基本塊建立關聯。利用這些資訊，透過最小分群算法（Minimum Cluster Algorithm）來識別不可分割的位元組邊界，作為輸入格式的欄位邊界。
+
+%本研究參考 AIFORE「以目標程式實作為使用手冊」的精神 \cite{shi2023aifore}，嘗試逆向目標程式的命令列參數，而不是直接遵從「真正的」使用手冊。這個方法更能測試目標程式對於規範以外的非預期輸入是否能夠正確處理。
+Our study, following AIFORE's principle of "using the target program as a user manual," \cite{shi2023aifore} attempts to reverse engineer the command-line parameters of the target program, rather than directly adhering to the "real" user manual. This method is more effective in testing whether the target program can correctly handle unexpected input outside the specification.
+
+\fi

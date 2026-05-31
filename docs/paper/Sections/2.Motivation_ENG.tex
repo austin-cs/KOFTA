@@ -1,0 +1,174 @@
+\section{BACKGROUND and MOTIVATION}
+\label{ch:motivation}
+
+%AFL是一個由 Google 開發與維護的開源模糊測試工具。雖然，已經停止更新，但因其有效性及開源的特性，許多最先進的模糊測試工具，包含本研究所提出的架構，皆以 AFL 為基礎進行開發。
+AFL is a fuzzing tool developed and maintained by Google; %Although it has stopped being updated, 
+its effectiveness and open-source nature have led many state-of-the-art fuzzing tools, including the architecture proposed in this study, to be developed based on AFL.
+
+\subsection{AFL}
+
+%因測試覆蓋率為軟體測試的一個重要指標，越高的覆蓋率通常也代表有更高的機率找出問題。因此，有效率地評估覆蓋率，以及產生能夠提供新覆蓋率的種子，為AFL實作的兩大課題。
+%Since test coverage is a crucial metric in software testing, higher coverage typically indicates a higher probability of identifying problems. Therefore, efficiently evaluating coverage and generating seeds that can provide new coverage are two major challenges in AFL implementation.
+
+%AFL應用「基因演算法」產生多樣化的種子，以「分支覆蓋率」（edge coverage）作為「適應值」，評估種子是否應該保留。
+AFL uses a "genetic algorithm" to generate diverse seeds, using "edge coverage" as the "fitness value" to evaluate whether a seed should be retained. 
+
+\iffalse
+\subsubsection{AFL Coverage Assessment} %AFL 覆蓋率評估
+
+AFL 使用一塊共享記憶體（shared memory）紀錄多次執行路徑的分支覆蓋率資訊，可以視為一個分支（edge）的雜湊表（hash table），用於紀錄分支被走過的次數。在編譯階段，AFL 會對目標程式進行靜態插樁（static instrumentation），分析原始碼中的基本塊（basic block）並分配一個獨有的編號（ID）。同時在基本塊中插入程式碼片段，執行時將前一個基本塊的編號與當前基本塊的編號做異或（XOR）計算，該異或值可以作為一個分支的雜湊值，將共享記憶體中對應的分支執行次數增加一。當 AFL 評估種子能夠產生新的分支路徑時，便會將其保留並加入種子池中。
+
+\subsubsection{AFL Mutation Method} %AFL 變異方式
+
+因為一個種子代表著一種目標程式的執行路徑，因此透過父代種子繁衍子代可以提高分支覆蓋率。AFL 的變異方式以基因演算法的突變為主，使用一個種子作為父代執行以下操作：包含了位元翻轉（bit flip）、位元組翻轉（byte flip）、算術加減（add and sub）、插入與刪除（insert and delete）等等。另外也有類似交叉的方式，拼接兩個父代種子後再做前述突變。不論哪種方法，都是期望新的子代種子能夠有不同的執行路徑，產生新的分支覆蓋率。
+
+相對於廣闊的輸入空間，AFL 的變異方式雖然略顯單調；但有因為有覆蓋率的引導，加上 AFL 執行的速度非常快，可以在短時間內產生並測試大量的種子，因此這個簡單粗暴的方法在多數的情況下還是能有不錯的效果。AFL 執行速度的優勢得力於另一項重要的設計：forkserver。
+
+\subsubsection{AFL Forkserver}
+
+對於要在短時間內測試大量種子的 AFL 而言，forkserver 的目的是為了避免頻繁地使用 exec 系統呼叫（system call）；使用不同的種子進行測試時，AFL 取而代之會使用 fork 這個執行成本相對較低的系統呼叫。forkserver 的程式碼片段同樣利用靜態插樁增加至目標程式中，在測試時控制不同種子之間的切換。然而這個設計只適用於目標程式使用固定的命令列選項，因此多參數模糊測試工具會關閉 forkserver，使用執行成本較大的 exec 系統呼叫，方便測試不同的選項組合。
+
+總結前述的三個設計，都是為了能夠在短時間內提高程式碼覆蓋率。
+然而，當分支條件較複雜(例如有字串匹配、巢狀分支)的情況下，這些特定的路徑將會難以探索。近年來相關的研究提出了一些方法：符號執行（symbolic execution）、汙染源分析（taint analysis）結合模糊測試、多參數模糊測試等等。
+\fi
+
+\subsection{Taint Inference} %汙染源推論
+
+%汙染源推論(taint inference)是一種分析資料流（data flow）的技術。
+Taint inference is a technique for analyzing data flow.
+
+%介紹汙染源推論前，先介紹另外兩種類似的技術：符號執行、汙染源分析。
+
+\if false
+\subsubsection{Symbolic Execution} %符號執行
+
+符號執行 \cite{king1976symbolic} 的核心理念是將程式的輸入表示為符號變數（symbolic variables），並通過分析程式的執行路徑來推導輸入條件。符號執行需要使用模擬器執行目標程式，當執行數學、指派（assignment）、關係（relation）、比較（comparison）等運算時，模擬器會使用符號變數表示並記錄運算的過程。因此目標程式執行後不會是一個固定的結果，而是一組與這些符號變數相關的數學約束條件（constraints）。因為符號變數不是具體的值，所以符號執行遇到分支條件時，會產生兩種程式狀態（state）、與之對應的兩個約束條件（分支條件成立、不成立）。理論上透過符號執行可以蒐集程式所有執行路徑的約束條件，再透過 SMT 求解器（Satisfiability Modulo Theories solver）\cite{barrett2018satisfiability} 得到能夠滿足約束條件的具體輸入，如此便能夠探索所有可能的路徑。然而現實中，大量的分支可能會導致路徑爆炸（path explosion）問題 \cite{boonstoppel2008rwset, krishnamoorthy2010tackling}。路徑爆炸產生的大量程式狀態會使得 SMT 求解器非常耗時，甚至無法解決。
+
+\subsubsection{Taint Analysis} %汙染源分析
+
+汙染源分析也是一種追蹤資料流的技術。用於追蹤汙染源（taint source，不信任的輸入）在程式中的流向，檢查汙染源是否進入了污染終點（taint sink，某些敏感的操作，例如 SQL 查詢、命令執行），可能會導致安全漏洞。後有研究將汙染源分析與模糊測試結合 \cite{chen2018angora,rawat2017vuzzer,wang2010taintscope}，用於輔助模糊測試探索不同的分支路徑。在繁衍子代種子前，首先將父代種子的每個位元組都標記為汙染源；若父代種子的執行路徑上有尚未探索的分支路徑，再將這些分支條件標記為汙染終點。經過汙染源分析後，便能夠知道父代種子中的哪些位元組（汙染源）可能會影響這些分支條件（汙染終點）的結果。模糊測試工具就可以針對這些位元組進行變異，提高子代種子增加覆蓋率的機會。
+
+汙染源分析與模糊測試結合可以增強探索不同執行路徑的能力，但因為整個種子都被標記為汙染源，追蹤目標程式執行時每個汙染源的傳遞（propagation）相當耗時。因此有研究提出一種輕量化、更適用於模糊測試場景的方法：汙染源推論。
+\fi
+
+\subsubsection{Inference-based Taint Analysis} %基於推論的汙染源分析
+
+%基於推論的汙染源分析（inference-based taint analysis），
+%
+%或稱「汙染源推論」 \cite{aschermann2019redqueen,gan2020greyone,lemieux2018fairfuzz,you2019profuzzer}。其目標是找出那些可能會影響分支條件（汙染終點）的輸入位元組（汙染源）。不同「基於傳遞的汙染源分析」（propagation-based taint analysis） \cite{chen2018angora,rawat2017vuzzer,wang2010taintscope}，它不會預先將整個輸入標記為汙染源，也不會實際分析目標程式中資料的傳遞。汙染源推論會記錄感興趣之分支條件在執行當下的狀態（例如，比較運算子的左、右運算元之值），接著逐一變異每一個輸入位元組並執行。當發現改變某個位元組能影響分支條件中的狀態時，便將該位元組標記為汙染源。
+Also known as "taint inference" \cite{aschermann2019redqueen,gan2020greyone,lemieux2018fairfuzz,you2019profuzzer}, its goal is to identify input bytes (taint sources) that might affect branch conditions (taint sinks). Unlike "propagation-based taint analysis" \cite{chen2018angora,rawat2017vuzzer,wang2010taintscope}, it does not pre-mark the entire input as a taint source, nor does it actually analyze the propagation of data in the target program. Taint inference records the current state of the branch conditions of interest during execution (e.g., the values of the left and right operands of comparison operators), and then mutates each input byte one by one and executes. When it is found that changing a byte can affect the state in the branch condition, that byte is marked as a tainted source.
+
+%模糊測試工具可以針對這些汙染源進行變異，提高子代種子增加覆蓋率的機會。得利於 forkserver，每一次位元組變異後的執行都可以視為執行一次測試，而且速度很快。
+Fuzzing tools can mutate these taint sources, increasing the chances of offspring seeds gaining more coverage. Thanks to forkserver, each execution after byte mutation can be considered a test, and it's very fast.
+%相對於汙染源分析，這個方法更適合與模糊測試結合。
+
+\subsection{Multi-Argument Fuzzing} %多參數模糊測試
+
+%實作功能複雜、設計精良的程式時，常會將不同的功能切分為不同的模組（module）；使用時，可以指定不同的命令列參數，選擇執行不同的功能模組。
+%然而，傳統的模糊測試使用固定的命令列參數，導致某些模組完全無法進行測試。因此，有研究 \cite{wu2020sq}提出：列舉目標程式的命令列參數，並針對參數進行組合測試；這個方法在之後相關的研究中，被稱為多參數模糊測試。
+%When implementing complex and well-designed programs, different functions are often divided into different modules. During use, different command-line parameters can be specified to select and execute different functional modules. 
+However, traditional fuzzing uses fixed command-line parameters, making some modules completely untestable. Therefore, some researcher \cite{wu2020sq} had proposed listing the command-line parameters of the target program and performing combinatorial testing on these parameters; this method is known as multi-argument fuzzing in subsequent research.
+%多參數模糊測試通常在前期產生較大的幫助：組合不同的選項可以產生跨模組的效果，快速地顯著提升覆蓋率。
+% Multi-argument fuzzing is often very helpful in the early stages: combining different options can produce cross-module effects, quickly and significantly improving coverage.
+
+\subsection{Research Motivation} %研究動機
+
+%現有的多參數模糊測試工具需提供一個選項組態檔--描述目標程式可使用的選項，用以將選項隨機組合進行測試。這方法有兩個問題。其一是需要專家介入，協助撰寫選項組態檔；並且，複雜的程式可以有非常多的選項種類，閱讀使用手冊是費時費力而且容易出錯。其次是組態檔只能描述固定、有限的選項；產生的選項組合缺乏彈性，導致某些執行路徑難以被探索。
+Existing multi-argument fuzzing tools require an option configuration file—describing the options available to the target program—for random combination of these options during testing. This approach has two problems. First, it requires expert intervention to assist in writing the option configuration file; furthermore, complex programs can have a wide variety of options, making reading the user manual time-consuming, laborious, and prone to errors. Second, the configuration file can only describe fixed, limited options; the resulting option combinations lack flexibility, making it difficult to explore certain execution paths.
+
+\subsubsection{Command-line Interface (CLI)} %命令列界面
+
+%使用CLI執行程式時，須根據設計提供正確參數。以執行 \texttt{ls} 命令為例：可分為六個「參數（argument）」：\texttt{ls}、\texttt{-a}、\texttt{--width}、\texttt{20}、\texttt{--} 及 \texttt{home}。
+When using CLI to execute programs, the correct parameters must be provided according to the design. Taking the `ls` command as an example, there are six "arguments": `ls`, `-a`, `--width`, `20`, `--`, and `home`.
+
+\iffalse
+\begin{lstlisting}[numbers=none]
+ls -a --width 20 -- /home
+\end{lstlisting}
+\fi
+
+%第一個參數是要執行的程式：\texttt{ls}。緊接著是選項列表，列表中以「\texttt{-}」開頭的參數稱為「選項（option）」：\texttt{-a} 及 \texttt{--width}。慣例上，以「\texttt{-}」加上一個「字元」代表短選項；而「\texttt{--}」加上「單詞」則表示長選項。一選項後可以接非選項的參數，稱為「選項參數（optional argument）」，如這裡的 \texttt{20} 即為 \texttt{--width} 的選項參數。單純的「\texttt{--}」是一個特別的分割符，代表選項列表的結束。即使之後有以「\texttt{-}」開頭的參數，也不作為一個選項進行解析。
+
+The first argument is the program to be executed: \texttt{ls}. This is followed by a list of options, where arguments beginning with "\texttt{-}" are called "options": \texttt{-a} and \texttt{--width}. By convention, "\texttt{-}" followed by a single character represents a short option, while "\texttt{--}" followed by a single word represents a long option. An option can be followed by a non-option argument, called an "optional argument," such as \texttt{20}, which is the option argument for \texttt{--width}. The simple "\texttt{--}" is a special separator, indicating the end of the option list. Even if subsequent arguments begin with "\texttt{-}", they are not parsed as options.
+
+\subsubsection{Motivation Example} %動機範例
+
+%大部分程式解析命令列參數的方法不外乎是使用 \texttt{if-else} 字串匹配（Listing \ref{lst:xmllint-argparse}），或是 C 標準函式庫中的 \texttt{getopt()}、\texttt{getopt\_long()} （GNU extension）搭配 switch-case（Listing \ref{lst:readelf-argparse}）。不論哪種方式，解析不同的命令列參數時，都會產生不同的分支路徑。多參數模糊測試預先定義可能的選項、選項參數，協助通過這些分支。
+Most programs parse command-line arguments by using \texttt{if-else} string matching  or the C standard library's \texttt{getopt()} and \texttt{getopt\_long()} (GNU extension) combined with a switch-case statement. Regardless of the method, parsing different command-line arguments will result in different branching paths. Multi-argument fuzzing pre-defines possible options and option arguments to assist in navigating these branches.
+
+\iffalse
+\begin{lstlisting}[float=h!, caption=\texttt{readelf} 參數解析（節錄）, label=lst:readelf-argparse]
+static struct option options[] =
+{
+  {"section-groups",   no_argument, 0, 'g'},
+  {"full-section-name",no_argument, 0, 'N'},
+  {"dwarf-depth", required_argument, 0, OPTION_DWARF_DEPTH},
+  {"ctf-symbols", required_argument, 0, OPTION_CTF_SYMBOLS},
+  {0, no_argument, 0, 0}
+};
+
+while ((c = getopt_long
+            (argc, argv, "Ng", options, NULL)) != EOF)
+{
+  switch (c)
+  {
+  case 'g':
+    do_section_groups = true;
+    break;
+  case 'N':
+    do_sections = true;
+    do_section_details = true;
+    break;
+  case OPTION_CTF_SYMBOLS:
+    dump_ctf_symtab_name = strdup (optarg);
+    break;
+  case OPTION_DWARF_DEPTH:
+    dwarf_cutoff_level = strtoul (optarg, &cp, 0);
+    break;
+  default:
+    error (_("Invalid option '-%c'\n"), c);
+  case '?':
+    usage (stderr);
+  }
+}
+\end{lstlisting}
+
+\begin{lstlisting}[float=h!, caption=\texttt{xmllint} 參數解析（節錄）, label=lst:xmllint-argparse]
+if ((!strcmp(argv[i], "-debug")) ||
+    (!strcmp(argv[i], "--debug"))) {
+    lint->debug = 1;
+} else if ((!strcmp(argv[i], "-shell")) ||
+           (!strcmp(argv[i], "--shell"))) {
+    lint->shell = 1;
+} else if ((!strcmp(argv[i], "-copy")) ||
+           (!strcmp(argv[i], "--copy"))) {
+    lint->copy = 1;
+}
+\end{lstlisting}
+
+\fi
+
+\iffalse
+%相較於分析選項經常透過幾種固定的函式進行，選項參數解析的方法更多樣化，也面對更大的輸入空間。
+Compared to the analysis of options which often involves a few fixed functions, the methods for parsing option parameters are more diverse and involve a larger input space.
+%若選項參數為數值類型，則幾乎不可能在參數組態檔中列舉所有的值(特別是使用手冊規範以外的可能)；若為字串類型，也可能存在未被寫入文件、但實際上合法可用之值。
+If the option argument is a numeric type, it is almost impossible to list all the values in the parameter configuration file (especially those outside the user manual specification); if it is a string type, there may be values that are not written to the documentation but are actually valid and usable.
+%因此，根據使用手冊等文檔而製作的組態檔，很難驗證目標程式對於使用手冊規範以外的輸入是否能夠正確的處理。
+%同理，選項也可能因使用手冊與程式實作間存在差異，而有選項未被文件載明的情況。
+Similarly, due to differences between the user manual and the program implementation, some options may not be specified in the documentation.
+
+%需要測試的選項參數，輸入空間十分廣闊，探索其中的可能正是基因演算法的強項；而多參數模糊測試的核心是要克服與參數相關的分支條件，與汙染源推論的目的不謀而合。將選項參數當作可能的汙染源、分支條件當作汙染終點，透過汙染源推論找出能夠影響分支路徑的關鍵參數，對其進行各種變異，充分探索參數的輸入空間，或許能有超越一般多參數模糊測試的效果。
+\fi
+%\newpage
+
+\subsection{Research Challenges} %研究挑戰
+
+%對於選項而言，分析原始碼中的\texttt{strcmp()}、\texttt{getopt()}、\texttt{getopt\_long()}等關鍵函式，比起參考使用手冊，可以更全面的探索潛在的可能。因此，第一個挑戰是透過編譯時期的靜態分析，自動化地找出可能的選項字串。
+The first challenge is to automatically identify possible option strings through compile-time static analysis. For options, analyzing critical functions such as \texttt{strcmp()}, \texttt{getopt()}, and \texttt{getopt\_long()} in the source code allows for a more comprehensive exploration of potential possibilities than referring to the user manual.
+
+%對於選項參數而言，解析方法十分多樣，無法直接分析特定函式。因此，第二個挑戰是利用汙染源推論，根據回饋提示而變異參數，分析能夠影響分支路徑的選項參數；為前項挑戰中找到的選項，帶入選項參數，充分探索廣闊的輸入空間。
+The second challenge is to use taint inference to mutate arguments based on feedback hints and analyze option arguments that can affect branch paths; for the options found in the previous challenge, substitute the option arguments to fully explore the broad input space. For option arguments, there are many analytical methods, making it impossible to directly analyze a specific function. 
+
+%對於一般的多參數模糊測試而言，汙染源推論需要逐一變異選項參數的每一個位元組並執行，如果每次都需要使用 exec 系統呼叫，將會是一筆不小的額外開銷（overhead）。因此，第三個挑戰是要讓 forkserver 能夠提供不同的參數給目標程式執行。
+The third challenge is to provide different arguments to the target program for execution without restarting the forkserver. For typical multi-argument fuzzing, integrated taint inference requires mutating each byte of the option arguments and executing the process. If an exec system call is needed each time, it would be a significant overhead. 
+%\vfill

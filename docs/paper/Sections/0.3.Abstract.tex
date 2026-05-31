@@ -1,0 +1,39 @@
+\begin{center}
+    \large
+    
+    \begin{singlespace}
+        \textbf{\englishTitle{}} \\[0.5cm]
+    \end{singlespace}
+    
+    \begin{singlespace}
+        Student : \studentEnName{}  \hspace{1.0cm} 
+        % 兩個指導教授要寫 Advisors
+        \ifdefined\advisorCnNameB
+            Advisors: Dr.\, \advisorEnName \\
+            \hspace{6.6cm} Dr.\, \advisorEnNameB  \\
+        \else
+            Advisor: Dr.\, \advisorEnName \\
+        \fi
+    \end{singlespace}
+    
+    \vspace{0.5cm}
+    \begin{singlespace}
+        \NameofDepartmentInstituteEN\\
+        National Yang Ming Chiao Tung University\\[0.2cm]
+    \end{singlespace}
+    
+    \textbf{Abstract} \\[0.5cm]
+
+\end{center}
+
+\normalsize 
+  
+Fuzzing is a critical technique in the field of information security. However, most existing fuzzing tools focus exclusively on mutating input files or standard inputs with fixed command-line options, limiting their flexibility in exploring multiple options (multi-arguments) and often requiring expert-defined option configuration files. To address these limitations, this study proposes an option-aware fuzzing framework called KOFTA. KOFTA integrates static and dynamic analyses to automatically explore available command-line options and parameters, employing taint inference techniques to precisely identify critical parameters that influence branching paths, thereby fully exploring extensive input spaces. Additionally, by enhancing AFL's forkserver, KOFTA dynamically updates the target program's command-line arguments, significantly reducing the overhead of system calls during testing. Experimental results demonstrate KOFTA's superior performance compared to traditional multi-argument fuzzing tools in terms of improved test coverage, discovery of undocumented options and parameters, and vulnerability detection. An open-source prototype is provided to support future research and practical applications.
+
+\vspace{1cm}
+
+% 5-7 Keywords (English)
+\begin{tabular}{r l}
+\textbf{Keywords:} &Fuzzing, Multi-Option Fuzzing, Option-Aware Fuzzing, \\
+                   &Taint Analysis, Taint Inference
+\end{tabular}

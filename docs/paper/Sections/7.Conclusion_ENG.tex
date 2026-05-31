@@ -1,0 +1,63 @@
+\section{CONCLUSION}
+\label{ch:conclusion}
+\iffalse
+本研究設計了一種全新的多參數模糊測試架構，並實作了開源的原型：KOFTA。
+透過 KOFTA，能夠從 6 個目標程式中找到共7未載明於文件的選項與37個未載明於文件的選項參數。
+與其他多參數模糊測試工具的比較中，目標程式的路徑覆蓋率比 Wei-fuzz \cite{tseng2023wei} 高出 39.05\%。並且，如使用 KOFTA 產生選項、選項參數組合以協助 Wei-fuzz 進行測試，更可比原本設定多出 16.54\% (最大)的路徑覆蓋率。
+%證實了本研究對於多參數模糊測試的有效性。
+\else
+This study designed a novel multi-parameter fuzzing architecture and implemented an open-source prototype: KOFTA.
+Using KOFTA, a total of 7 undocumented options and 37 undocumented option arguments can be found from 6 target programs.
+In comparison with other multi-parameter fuzzing tools, the edge coverage of the target programs is 39.05\% higher than that of Wei-fuzz \cite{tseng2023wei}. Furthermore, if KOFTA is used to generate option and option parameter combinations to assist Wei-fuzz in testing, the edge coverage can be increased by 16.54\% (maximum) compared to the original settings.
+\fi
+
+\subsection{Vulnerability Discovery} %漏洞挖掘
+\iffalse
+下表（Table \ref{tab:kofta-bugs}）列出 KOFTA 挖掘的漏洞：總共發現了7個程式漏洞 -- 其中有5個被確認，並且有3個已經被修復。
+\fi
+The following table (Table \ref{tab:kofta-bugs}) lists the vulnerabilities discovered by KOFTA: a total of 7 vulnerabilities were found -- 5 of which have been confirmed and 3 have been fixed.
+
+\begin{table}[h!] %[hb]
+    \centering
+    \begin{threeparttable}
+        \caption{Vulnerability List} %漏洞列表
+        \label{tab:kofta-bugs}
+        \begin{tabularx}{0.48\textwidth}{
+                >{\ttfamily}c
+                >{\ttfamily}c|
+                >{\ttfamily\centering}X
+                >{\ttfamily\centering\arraybackslash}X}
+            \toprule
+            \textbf{Program}  & \textbf{Version} & \textbf{Type} & \textbf{Status}\\
+            \midrule
+            img2sixel      & 1.10.5 & heap-buffer-overflow &  \makecell{Duplicate\\(issue-71)}\\
+            img2sixel      & 1.10.5 & FPE                  &  \makecell{Duplicate\\(CVE-2022-29978)}\\
+            img2sixel      & 1.10.5 & FPE                  &  \makecell{Duplicate\\(issue-74)}\\
+            mutool clean   & 1.26.3 & SEGV                 &  \makecell{Fixed\\(issue-708693)}\\
+            mutool convert & 1.26.3 & heap-use-after-free  &  \makecell{Fixed\\(issue-708678)}\\
+            mutool convert & 1.26.3 & SEGV                 &  \makecell{Fixed\\(issue-708679)}\\
+            objdump        &   2.44 & stack-overflow       &  \makecell{Won't fix\\(issue-33193)}\\
+            \bottomrule
+        \end{tabularx}
+    \end{threeparttable}
+\end{table}
+
+
+\subsection{Future Works} %未來方向
+\iftrue
+
+%KOFTA 仍有以下兩方向值得加強。
+\subsubsection{Mutating Option Argument} %參數選項的變異
+\iffalse
+目前只對「提示」做簡單的變異（\texttt{$\pm$1}、\texttt{$\pm$107}）。如果要克服數值類型之「條件限制」，可加入線性搜尋等已被證實有效的策略。
+\else
+Currently, only simple mutations are made to the "hints" (\texttt{$\pm$1},\texttt{$\pm$107}). To overcome the "conditional constraints" of numeric type, proven effective strategies such as linear search can be added.
+\fi
+\subsubsection{Task Scheduling} %任務規劃
+\iffalse
+可結合Wei-fuzz \cite{tseng2023wei}所提出之 MAB 方法，透過強化學習，動態調整文件變異與選項變異的時間分配比例。
+\else
+It can be combined with the MAB method proposed by Wei-fuzz \cite{tseng2023wei} to dynamically adjust the time allocation ratio of document mutation and option mutation through reinforcement learning.
+\fi
+
+\fi

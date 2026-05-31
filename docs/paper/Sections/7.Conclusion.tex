@@ -1,0 +1,37 @@
+\chapter{Conclusion}
+\label{ch:conclusion}
+
+本研究提出了一種全新的多參數模糊測試架構，並實作了開源的原型：KOFTA。透過 KOFTA 能夠從 6 個目標程式中找到共 7 未載明於文件的選項與 37 個未載明於文件的選項參數。在與 其他多參數模糊測試工具的比較中，更有目標程式的路徑覆蓋率比 Wei-fuzz 高出 39.05\%。並且如果使用 KOFTA 產生選項、選項參數組合協助 Wei-fuzz 進行測試，更可以產生比原本設定最多多出 16.54\% 的路徑覆蓋率。證實了本研究對於多參數模糊測試的有效性。
+
+\section{漏洞挖掘}
+
+下表（Table \ref{tab:kofta-bugs}）列出透過 KOFTA 挖掘的漏洞，截至目前為止，總共發現了 7 個程式漏洞，其中有 5 個被確認，並且有 3 個已經被修復。
+
+\begin{table}[hb]
+    \centering
+    \begin{threeparttable}
+        \begin{tabularx}{\textwidth}{
+                >{\ttfamily}c
+                >{\ttfamily}c|
+                >{\ttfamily\centering\arraybackslash}X
+                >{\ttfamily\centering\arraybackslash}X}
+            \toprule
+            \textbf{Program}  & \textbf{Version} & \textbf{Type} & \textbf{Status} \\
+            \midrule
+            img2sixel      & 1.10.5 & heap-buffer-overflow &  \makecell{Duplicate\\(issue-71)} \\
+            img2sixel      & 1.10.5 & FPE                  &  \makecell{Duplicate\\(CVE-2022-29978)} \\
+            img2sixel      & 1.10.5 & FPE                  &  \makecell{Duplicate\\(issue-74)} \\
+            mutool clean   & 1.26.3 & SEGV                 &  \makecell{Fixed\\(issue-708693)} \\
+            mutool convert & 1.26.3 & heap-use-after-free  &  \makecell{Fixed\\(issue-708678)} \\
+            mutool convert & 1.26.3 & SEGV                 &  \makecell{Fixed\\(issue-708679)} \\
+            objdump        &   2.44 & stack-overflow       &  \makecell{Wontfix\\(issue-33193)} \\
+            \bottomrule
+        \end{tabularx}
+        \caption{漏洞列表}
+        \label{tab:kofta-bugs}
+    \end{threeparttable}
+\end{table}
+
+\section{未來方向}
+
+KOFTA 仍然有許多地方值得加強。在參數選項的變異方面，目前只會根據提示做簡單的變異（\texttt{$\pm$1}、\texttt{$\pm$107}）；如果要增強通過數值類型條件限制的能力，可以加入線性搜尋等等已經被證實有效的策略。在任務規劃方面，可以結合如同 Wei-fuzz 所提出的 MAB 方法，透過強化學習動態調整文件變異與選項變異的時間分配比例。

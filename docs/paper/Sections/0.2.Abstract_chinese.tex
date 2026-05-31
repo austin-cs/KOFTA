@@ -1,0 +1,29 @@
+\begin{center}
+    \large
+    \begin{singlespace}    
+        \textbf{\chineseTitle{}} \\[0.5cm]
+    \end{singlespace}
+
+    \begin{singlespace}    
+    學生：\studentCnName  \hspace{2.5cm}  指導教授：\advisorCnName \hspace{0.1cm} 博士 \\
+
+    \ifdefined\advisorCnNameB % 如果有共同指導教授
+        \hspace{9.6cm}  \advisorCnNameB ~ 博士 \\
+    \fi
+    \end{singlespace}
+
+    \vspace{0.5cm}
+
+    國立陽明交通大學\ \NameofDepartmentInstituteCN\ \iftoggle{iamphd}{博士班}{碩士班} \\[0.5cm]
+    \textbf{摘\hspace{1cm}要} \\[0.5cm]
+
+\end{center}
+
+\normalsize 
+
+模糊測試（fuzzing）作為資訊安全領域的重要技術，主要透過提供大量隨機輸入，以找出目標程式中的潛在漏洞與錯誤。然而，現有的模糊測試工具多數只針對固定的命令列選項進行輸入檔或標準輸入的變異，對於多選項（多參數）的探索缺乏靈活性且需要專家介入定義參數組態檔。為解決這一限制，本研究提出了一個名為 KOFTA 的選項感知模糊測試架構。KOFTA 結合靜態分析與動態分析自動化地探索可用的命令列選項與選項參數，並利用污染源推論技術精確找出影響分支路徑的關鍵參數，以充分探索廣闊的輸入空間。此外，透過改良 AFL 的 forkserver，使其能夠動態更換目標程式的命令列參數，有效降低測試過程中的系統呼叫成本。實驗結果顯示，相較於傳統的多參數模糊測試工具，KOFTA 在提升測試覆蓋率、發掘未知選項與參數，以及漏洞挖掘方面展現了明顯的優勢，並提供了一個開源的原型以供未來研究與應用。
+
+\vspace{1cm}
+
+% 中文摘要及關鍵詞 5-7 個 
+\textbf{關鍵字：}模糊測試, 多參數模糊測試, 選項感知模糊測試, 污染源分析, 污染源推論

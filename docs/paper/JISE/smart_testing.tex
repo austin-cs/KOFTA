@@ -1,0 +1,196 @@
+\documentclass[10pt,a4paper,twoside]{article}
+\usepackage{JISE}
+\usepackage{graphicx}
+\usepackage{times}
+\usepackage{mathptmx}
+
+\setcounter{page}{1}
+
+%%
+\usepackage{hyperref} % 啟用超連結功能，讓文檔中的參考連結可以點擊跳轉
+
+\usepackage{subcaption}
+\usepackage{caption}
+
+\usepackage[no-math]{fontspec}   %加這個就可以設定字體 
+\usepackage{xeCJK}       %讓中英文字體分開設置 
+\usepackage[UTF8,fontset=none,scheme=plain]{ctex}
+\setCJKmainfont[AutoFakeBold=4, AutoFakeSlant=0.2]{TW-Kai}
+\setCJKmonofont{Noto Sans Mono CJK TC}
+\usepackage{CJKnumb}
+
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{amsthm}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+%
+\usepackage{xcolor}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+% source code hightlighting
+\usepackage{listings}
+\lstset{
+    captionpos=b,
+    breaklines=true,
+    frame=single,
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=15pt,
+    numberbychapter=false,
+    lineskip=1pt,
+    basicstyle=\ttfamily\footnotesize,
+    tabsize=2,
+    showstringspaces=false,
+    language=C,
+    keywordstyle=\color{magenta},
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    stringstyle=\color{codepurple},
+    xleftmargin=.05\textwidth, xrightmargin=.05\textwidth,
+    framexrightmargin=5pt, framexleftmargin=5pt,
+    aboveskip=30pt, belowskip=30pt
+}
+% book table語法
+\usepackage{booktabs}
+
+\usepackage[flushleft]{threeparttable}
+\usepackage{tabularx}
+\usepackage{makecell}
+
+\usepackage{float}
+
+\newcommand{\paperTitle}{Option-Aware AI-Powered Fuzzing with Taint Inference}
+%%
+
+\title{\paperTitle\thanks{Communicated by the editor.}}
+\author{Nan-Jung Huang{\small$^+$}, Shih-Kun Huang and Ying-TA Chen\\
+  {\small\em Department of Computer Science} \\
+  {\small\em National Yang Ming Chiao Tung University}\\
+  {\small\em Hsin-Chu City, Taiwan}\\
+  {\small\em E-mail: \{njhang.cs11; skhuang; alardutp.cs11\}@nycu.edu.tw}
+}
+
+\authorrunning{Nan-Jung Huang, Shih-Kun Huang, Ying-TA Chen}
+\titlerunning{\paperTitle}
+
+\begin{document}
+\editorfootnote{Received March 11, 2014; revised June 20, 2014; accepted September 28, 2014. \\
+{\small$^+$}Corresponding author}
+%Corresponding author should be marked "+" otherwise it will be regarded as the first author.
+\maketitle
+
+\iffalse
+\begin{abstract}
+  All papers must be supplied with an abstract and 5–10 keywords (or key phrases). The abstract should be brief, concise, and complete in itself. Include purpose, methodology, results, and conclusion, where applicable. The keywords (or key phrases) should be as independent as possible, and jointly reflect the main topic of the paper.
+  \begin{keywords}
+  wireless sensor networks, localization, mobile beacon, mobile anchor, multiple processes
+  \end{keywords}
+\end{abstract}
+\else
+\input{Sections/0.3.Abstract_ENG}
+\fi
+
+%%
+\input{Sections/1.Introduction_ENG}
+\input{Sections/2.Motivation_ENG}
+\input{Sections/3.Design_ENG}
+\input{Sections/4.Implementation_ENG}
+\input{Sections/5.Evaluation_ENG}
+\input{Sections/6.RelatedWork_ENG}
+\input{Sections/7.Conclusion_ENG}
+%%
+
+\iffalse
+\section*{[INTRODUCTION]}
+
+References to published literature should be quoted in the text in square brackets. Number all references to the literature in a single sequence in the order in which they are cited in the text and list them together at the end of the paper. For example: \cite{Wang1987,duda1973,ramachandran1983,CMU-CS-85-158,OReilly1979}. Author biography should be added at the end.
+Example of an equation:
+\begin{equation}
+  a=b+c
+\end{equation}
+that should be indented. 
+
+
+\section*{[SECTIONS]}
+\label{sec:sec}
+Section titles should be all capital letters. Example of an unnumbered list:
+\begin{itemize}
+  \item {An unnumbered item}
+  \item {Second item}
+\end{itemize}
+and a numbered list:
+\begin{enumerate}
+  \item The first item
+  \item The second item
+\end{enumerate}
+
+Example of math formatting in text. 
+For a group $G$ of $n~(>1)$ processes $p_{1}, \dots, p_{n}$, a
+vector $V$ is in a form $\langle V_{1}, \dots, V_{n} \rangle$.
+Every process $p_{i}$ has a vector $V = \langle V_{1}, \dots ,V_{n}
+\rangle$ where each element $V_{j}$ is initially $0$ ($j=1, \dots ,n$).
+Each time a process $p_{i}$ sends a message $m$, the $i$th element $V_{i}$ is incremented by one.
+Then, the message $m$ carries the vector $V$ ($m.V$) of the sender
+process $p_{i}$.
+On receipt of a message $m$ from another process, 
+$V_{k} := max (V_{k} , m.V_{k}) \ (k=1, \dots ,n,~k \neq i)$ in a process.
+Here, for a pair of vectors $A = \langle A_{1}, \dots ,A_{n} \rangle$
+and $B = \langle B_{1}, \dots, B_{n} \rangle$, $A \leq B$ {\em iff}
+$A_{j} \leq B_{j} \ (j=1, \dots , n)$.
+A message $m_{1}$ causally
+precedes another message $m_{2}$ $(m_{1} \rightarrow m_{2})$ {\em iff}
+$m_{1}.V \leq m_{2}.V$.
+A message $m_{1}$ is \textit{causally concurrent} with another message $m_{2}$ $(m_{1} \parallel m_{2})$
+{\em iff} neither $m_{1} \rightarrow m_{2}$ nor $m_{2} \rightarrow m_{1}$.
+
+An example of a table:
+\begin{table}[h]
+\caption{Performance for different systems.\label{tab:perf}}
+\centering
+\begin{tabular}{c|cccc}
+Range & 10 & 15 & 20 & 25 \\
+\hline
+Range & 10 & 15 & 20 & 25 \\
+\hline
+Range & 10 & 15 & 20 & 25 \\
+\end{tabular}
+\end{table}
+
+An example of a figure. Note that the resolution of pictures should be at least 300 dpi so as to maintain printing quality.
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{graph.png}
+\caption{Resolution of pictures should be at least 300 dpi.\label{fig1:fig}}
+\end{figure}%
+
+Refer to figures and tables like Fig.~\ref{fig1:fig} and Table~\ref{tab:perf}.
+
+\section*{[CONCLUDING REMARKS]}
+We provide an example for using the \LaTeX\ Template of the Journal of Information Science and Engineering. Any questions or bugs can be sent to the editor \cite{wang2010taintscope,chen2018angora}.
+\fi
+
+\section*{ACKNOWLEDGMENT}
+This is the Acknowledgment section. Note that it is unnumbered.
+
+
+\bibliographystyle{JISEbib}
+\bibliography{ref}
+%\bibliography{references}
+
+\begin{IEEEbiography}[{\includegraphics[width=3cm,height=4cm]{njhuang.jpg}}]{Nan-Jung Huang}
+received his B.S. (1988) degree in Computer Science and Information Engineering from National Chiao Tung University in Taiwan, and M.S. degree (1994) in the Department of Computer Science and Engineering from Mississippi State University, USA. He is currently a Ph.D. candidate in the Department of Computer Science at National Yang Ming Chiao Tung University. Mr. Huang's research focuses on software testing with an emphasis on taint analysis and multi-target directed fuzzing.
+\end{IEEEbiography}
+
+\begin{IEEEbiography}[{\includegraphics[width=3cm,height=4cm]{skhuang.jpg}}]{Shih-Kun Huang}
+received his B.S. (1989), M.S. (1991), and Ph.D. (1996) degrees in Computer Science and Information Engineering from National Chiao Tung University. From 1996 to 2004, he served as an Assistant Research Fellow at the Institute of Information Science, Academia Sinica. He is currently a professor at the Information Technology Service Center and holds a joint appointment with the Department of Computer Science at National Chiao Tung University. Dr. Huang's research focuses on the integration of software engineering and programming languages, with an emphasis on cybersecurity and software vulnerability analysis.
+\end{IEEEbiography}
+
+\begin{IEEEbiography}[{\includegraphics[width=3cm,height=4cm]{AlaRduTP_s.png}}]{Ying-TA Chen}
+received his M.S. (2025) degree in Department of Computer Science from National Yang Ming Chiao Tung University in Taiwan. Mr. Chen's research focuses on the integration of software engineering and programming languages, with an emphasis on cybersecurity and software vulnerability analysis.
+\end{IEEEbiography}
+
+\end{document}

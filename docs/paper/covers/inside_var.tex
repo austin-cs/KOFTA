@@ -1,0 +1,55 @@
+\begin{titlepage}
+  \begin{center}
+
+    \begin{minipage}[t][3cm][t]{\textwidth}
+        \centering
+        \fontsize{18}{22.5}\selectfont
+        \chineseTitle \\
+        \englishTitle \\
+    \end{minipage}
+  
+    \fontsize{14}{14}\selectfont
+    \begin{tabular}{r l c r l}
+    研\hspace{6pt}究\hspace{6pt}生： & \studentCnName & \hspace{0.6cm} & Student： & \studentEnName \\
+    指導教授： & \advisorCnName ~ 博士 & \hspace{0.6cm} & Advisor： & Dr. \advisorEnName \\
+    \ifdefined\advisorCnNameB % 如果有共同指導教授
+      & \advisorCnNameB ~ 博士 & & & Dr. \advisorEnNameB
+    \fi
+    \end{tabular}
+    
+    \vspace{2.5cm}
+
+    \fontsize{14}{17.5}\selectfont
+
+    國立陽明交通大學 \\
+    \NameofDepartmentInstituteCN \\  
+    \iftoggle{iamphd}{博士論文}{碩士論文} \\     
+
+    \vspace{1.8cm}
+
+    \fontsize{14}{14}\selectfont
+
+    A \iftoggle{iamphd}{Dissertation}{Thesis} ~\\
+    Submitted to \NameofDepartmentInstituteEN \\
+    \NameofCollegeEN \\
+    National Yang Ming Chiao Tung University \\
+    in partial Fulfillment of the Requirements \\
+    for the Degree of \\
+    \NameofDegree \\
+    \ifdefined\ResearchTopic
+      in \\ \ResearchTopic
+    \fi
+
+    
+    \vspace{\fill}
+
+    \ThesisDate \\
+    Taiwan, Republic of China \\
+    ~ \\
+
+    \fontsize{18}{22.5}\selectfont  \ThesisDateTW
+
+
+  \end{center}
+\end{titlepage}
+
