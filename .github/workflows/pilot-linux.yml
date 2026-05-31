@@ -1,0 +1,75 @@
+name: pilot-linux
+
+# Stage 2 PILOT: a small-scale, offline (--mock, no API) end-to-end run of the
+# whole SHS evaluation pipeline -- kofta-campaign launches a tiny matrix
+# (kofta/kshs/kshsng x the toy smoke target x 2 runs), post-processing extracts
+# edges/opts/cost, and kofta-stats turns those real artifacts into real (non
+# [\;]) LaTeX table rows. It validates the orchestration + extraction + stats
+# wiring before the expensive Stage 3 campaigns spend real compute + API budget.
+#
+# Like smoke-linux, this MUST run on a native x86_64 runner in an Ubuntu 20.04
+# container (glibc 2.31): KOFTA's __args_leak forkserver needs glibc <=2.33 AND
+# real (non-emulated) x86_64 -- QEMU-emulated x86_64 (e.g. Colima on Apple
+# Silicon) breaks the forkserver the same way glibc 2.34+ does, so the real
+# pilot can only be exercised here, not on a developer's arm64 laptop.
+
+on:
+  push:
+    paths:
+      - "**.c"
+      - "**.h"
+      - "llvm_mode/**"
+      - "Makefile"
+      - "docker/**"
+      - "kofta-shs"
+      - "kofta-campaign"
+      - "kofta-stats"
+      - "kofta-opts"
+      - "shs/**"
+      - ".github/workflows/pilot-linux.yml"
+  pull_request:
+    paths:
+      - "**.c"
+      - "**.h"
+      - "llvm_mode/**"
+      - "Makefile"
+      - "docker/**"
+      - "kofta-shs"
+      - "kofta-campaign"
+      - "kofta-stats"
+      - "kofta-opts"
+      - "shs/**"
+      - ".github/workflows/pilot-linux.yml"
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    # glibc 2.31 + clang-12; see the header comment and smoke-linux.yml for why
+    # the OS version is load-bearing.
+    container: ubuntu:20.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang/llvm 12 + tooling
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            clang-12 llvm-12-dev make libc6-dev python3 ca-certificates
+
+      # Host-agnostic wiring test: drives shs.campaign with fake fuzzer/showmap/
+      # opts commands (no forkserver), so it would catch orchestration/extraction
+      # regressions even if the real run below were skipped. Uses the module's
+      # built-in runner so no pytest install is needed.
+      - name: Orchestrator wiring test (no forkserver)
+        run: python3 -m shs.tests.test_campaign
+
+      # Real end-to-end: builds in place and runs the actual kofta-campaign with
+      # the mock SHS client. Asserts kofta-stats produced a populated smoke row,
+      # so a green job means the whole real pipeline round-tripped.
+      - name: Run SHS pilot campaign (mock, no API)
+        run: |
+          PILOT_REPO="$GITHUB_WORKSPACE" \
+          PILOT_BUILD="$GITHUB_WORKSPACE" \
+            bash docker/run-pilot.sh

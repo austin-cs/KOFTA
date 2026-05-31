@@ -30,6 +30,10 @@ def parse_args() -> argparse.Namespace:
                    help="coverage metric for tab:cov (default: edges)")
     p.add_argument("--table", choices=["cov", "magic", "undoc", "cost", "all"],
                    default="all", help="which table to emit (default: all)")
+    p.add_argument("--targets", default=None,
+                   help="comma-separated target subset (default: the paper's "
+                        "eval binaries). Use this to score a pilot/custom target "
+                        "the hardcoded table lists don't include, e.g. --targets smoke")
     return p.parse_args()
 
 
@@ -80,8 +84,16 @@ def main() -> None:
         pok("metric=paths (plot_data paths_total -- a queue-size proxy)")
     psay("")
 
+    # Optional target override. The table emitters default to the paper's
+    # hardcoded eval binaries; a pilot or ad-hoc run uses a different target
+    # (e.g. "smoke"), which would otherwise render as all-placeholder rows.
+    targets = args.targets.split(",") if args.targets else None
+    cov_targets = targets or tables.COV_TARGETS
+    undoc_targets = targets or tables.UNDOC_TARGETS
+    cost_targets = targets or tables.COST_TARGETS
+
     if args.table in ("cov", "all"):
-        rows, f = tables.table_cov(root, args.metric)
+        rows, f = tables.table_cov(root, args.metric, targets=cov_targets)
         _emit("Table A: Edge Coverage (tab:cov)",
               "8.SemanticHintSynthesis_ENG.tex", rows)
         _facts_cov(f)
@@ -91,11 +103,11 @@ def main() -> None:
               "8.SemanticHintSynthesis_ENG.tex", rows)
         _facts_magic(f)
     if args.table in ("undoc", "all"):
-        rows, _ = tables.table_undoc(root)
+        rows, _ = tables.table_undoc(root, targets=undoc_targets)
         _emit("Table C: Undocumented Optargs (tab:undoc)",
               "8.SemanticHintSynthesis_ENG.tex", rows)
     if args.table in ("cost", "all"):
-        rows, _ = tables.table_cost(root)
+        rows, _ = tables.table_cost(root, targets=cost_targets)
         _emit("Table D: SHS Cost (tab:cost)",
               "8.SemanticHintSynthesis_ENG.tex", rows)
 
