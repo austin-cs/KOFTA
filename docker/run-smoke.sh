@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Runs inside the container (see docker/Dockerfile CMD). Builds KOFTA from the
 # read-only /repo bind mount, compiles the tiny instrumented target, runs a
-# short kofta-fuzz campaign with the SHS C seam wired to the offline --mock
+# short kofta-fuzz campaign with the SHS C seam launching one long-lived
+# `kofta-shs serve` co-process (NDJSON over a pipe) against the offline --mock
 # client, and asserts that the seam actually fired.
 #
 # PASS criterion: the KOFTA_DEBUG log contains at least one "shs_cand,..." line,
@@ -50,7 +51,10 @@ AFL_SKIP_CPUFREQ=1 \
 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 \
 PYTHONPATH="$BUILD" \
 KOFTA_SRCMAP="$WORK/srcmap.txt" \
-KOFTA_SHS="python3 $BUILD/kofta-shs query --mock --cache $WORK/cache.json" \
+KOFTA_SHS=1 \
+KOFTA_SHS_BIN="$BUILD/kofta-shs" \
+KOFTA_SHS_CACHE="$WORK/cache.json" \
+KOFTA_SHS_COST="$WORK/shs_cost.json" \
   timeout 180 "$BUILD/kofta-fuzz" -i "$WORK/in" -o "$WORK/out" \
     -m none -t 5000 \
     -k "$WORK/opts.txt" -- "$WORK/smoke" >"$WORK/fuzz.log" 2>&1
@@ -66,6 +70,9 @@ ls -la "$WORK/out" 2>/dev/null || echo "  (no out dir)"
 echo "==> SHS-related KOFTA_DEBUG lines (shs_init / shs_call / shs_cand):"
 grep -E "shs_init|shs_call|shs_cand|shs_noslice" "$WORK/KOFTA_DEBUG" 2>/dev/null || \
   echo "  (none -- the STR-hint block was never reached)"
+
+echo "==> SHS cost record (proves the serve co-process flushed --cost-out):"
+cat "$WORK/shs_cost.json" 2>/dev/null || echo "  (no shs_cost.json -- serve never shut down cleanly)"
 
 if grep -q "shs_cand" "$WORK/KOFTA_DEBUG" 2>/dev/null; then
   echo "==> PASS: SHS C seam fired (kofta-shs queried, candidates returned)"
