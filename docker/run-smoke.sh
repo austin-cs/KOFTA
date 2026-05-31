@@ -1,27 +1,42 @@
 #!/usr/bin/env bash
-# Runs inside the container (see docker/Dockerfile CMD). Builds KOFTA from the
-# read-only /repo bind mount, compiles the tiny instrumented target, runs a
-# short kofta-fuzz campaign with the SHS C seam launching one long-lived
-# `kofta-shs serve` co-process (NDJSON over a pipe) against the offline --mock
-# client, and asserts that the seam actually fired.
+# Builds KOFTA, compiles the tiny instrumented target, runs a short kofta-fuzz
+# campaign with the SHS C seam launching one long-lived `kofta-shs serve`
+# co-process (NDJSON over a pipe) against the offline --mock client, and asserts
+# that the seam actually fired.
+#
+# Two ways to run, both on a native x86_64 Linux host (KOFTA's runtime has
+# x86_64-only argv-leak asm; arm64 emulation breaks the forkserver):
+#   * In the verification container (docker/Dockerfile CMD): /repo is a
+#     read-only bind mount, so it is copied into a writable $BUILD first.
+#   * Directly on a CI runner (ubuntu-22.04 is native x86_64 + clang-12): point
+#     SMOKE_BUILD at the already-writable checkout and the copy is skipped.
+#
+# Overridable via env (defaults match the container layout):
+#   SMOKE_REPO   source tree              (default /repo)
+#   SMOKE_BUILD  writable build dir       (default /build; set == repo to build in place)
+#   SMOKE_WORK   scratch dir for the run  (default /work)
 #
 # PASS criterion: the KOFTA_DEBUG log contains at least one "shs_cand,..." line,
 # proving afl-fuzz.c queried kofta-shs and got candidates back. Finding the
 # planted crash is a bonus (printed but not required, since fork-timing varies).
 set -euo pipefail
 
-REPO=/repo
-BUILD=/build
-WORK=/work
+REPO="${SMOKE_REPO:-/repo}"
+BUILD="${SMOKE_BUILD:-/build}"
+WORK="${SMOKE_WORK:-/work}"
 
-echo "==> copying repo (read-only mount) into writable $BUILD"
-rm -rf "$BUILD"
-cp -r "$REPO" "$BUILD"
+if [ "$BUILD" != "$REPO" ]; then
+  echo "==> copying repo ($REPO) into writable $BUILD"
+  rm -rf "$BUILD"
+  cp -r "$REPO" "$BUILD"
+else
+  echo "==> building in place at $BUILD (no copy)"
+fi
 cd "$BUILD"
 
 echo "==> building afl-fuzz (KOFTA_DEBUG=1)"
-# AFL_NO_X86 skips the legacy GCC-mode x86 assembly self-test; the container is
-# arm64 and we only use the arch-independent llvm_mode (afl-clang-fast) path.
+# AFL_NO_X86 skips the legacy GCC-mode x86 assembly self-test; we only use the
+# llvm_mode (afl-clang-fast) path, so the gcc-mode self-test is irrelevant here.
 make clean >/dev/null
 AFL_NO_X86=1 make CC=clang-12 KOFTA_DEBUG=1
 

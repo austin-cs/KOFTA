@@ -1,0 +1,66 @@
+name: smoke-linux
+
+# Runtime smoke test for the SHS C seam. Unlike build-linux (compile-only), this
+# actually runs a short kofta-fuzz campaign and asserts the seam fires at
+# runtime: afl-fuzz launches the `kofta-shs serve` co-process, streams NDJSON,
+# and gets candidates back (a "shs_cand,..." line in the KOFTA_DEBUG log).
+#
+# Runs in an Ubuntu 20.04 container (glibc 2.31) on the native x86_64 runner.
+# The OS version is load-bearing: KOFTA's __args_leak relies on glibc <=2.33's
+# startup stack layout (see the `container:` note below), so 22.04/glibc 2.35
+# breaks the forkserver. 20.04 ships clang-12, satisfying both KOFTA's legacy
+# LLVM-pass requirement and the old-glibc requirement. run-smoke.sh builds in
+# place via SMOKE_BUILD and asserts the SHS serve co-process fires end-to-end.
+
+on:
+  push:
+    paths:
+      - "**.c"
+      - "**.h"
+      - "llvm_mode/**"
+      - "Makefile"
+      - "docker/**"
+      - "kofta-shs"
+      - "shs/**"
+      - ".github/workflows/smoke-linux.yml"
+  pull_request:
+    paths:
+      - "**.c"
+      - "**.h"
+      - "llvm_mode/**"
+      - "Makefile"
+      - "docker/**"
+      - "kofta-shs"
+      - "shs/**"
+      - ".github/workflows/smoke-linux.yml"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    # KOFTA's __args_leak (llvm_mode/kofta-llvm-rt.o.c) grabs argv/argc with a
+    # hardcoded stack offset ("lea 0x50(%rsp)", +0xc) tuned for glibc <=2.33's
+    # __libc_csu_init startup. glibc 2.34 (Ubuntu 22.04) refactored startup, so
+    # the offset points at garbage there and the forkserver dies on the dry run.
+    # Run inside an Ubuntu 20.04 container (glibc 2.31) -- the toolchain the
+    # KOFTA authors developed on -- where the offset is valid.
+    container: ubuntu:20.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang/llvm 12 + tooling
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            clang-12 llvm-12-dev make libc6-dev python3 ca-certificates
+
+      # Build in place (SMOKE_BUILD == checkout), scratch in the runner temp.
+      # The script asserts a "shs_cand" line and exits non-zero if the seam
+      # never fired, so a green job means the serve co-process really ran.
+      - name: Run SHS runtime smoke test
+        run: |
+          SMOKE_REPO="$GITHUB_WORKSPACE" \
+          SMOKE_BUILD="$GITHUB_WORKSPACE" \
+          SMOKE_WORK="$RUNNER_TEMP/smoke-work" \
+            bash docker/run-smoke.sh
