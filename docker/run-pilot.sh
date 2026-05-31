@@ -62,7 +62,10 @@ find pilot-campaign -maxdepth 4 -type f | sort || true
 echo "==> generating tables from the pilot artifacts (--targets smoke)"
 # kofta-stats defaults to the paper's eval binaries; the pilot target is "smoke",
 # so we must override the target list or every row is a placeholder.
-python3 ./kofta-stats pilot-campaign --targets smoke | tee pilot-stats.out
+# NOTE: kofta-stats emits every table row + facts line via debug.psay(), which
+# writes to STDERR (not stdout). So we must fold stderr into the pipe (2>&1) or
+# pilot-stats.out captures nothing and every assertion below fails spuriously.
+python3 ./kofta-stats pilot-campaign --targets smoke 2>&1 | tee pilot-stats.out
 
 echo "==> asserting kofta-stats produced real (non-placeholder) rows"
 # The kshs vs kofta comparison (RQ5 facts) only prints when both configs have
