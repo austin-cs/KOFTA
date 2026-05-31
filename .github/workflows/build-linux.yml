@@ -1,0 +1,43 @@
+name: build-linux
+
+# Baseline compile check for the C/LLVM parts of KOFTA. The LLVM pass uses the
+# legacy pass manager (PassManagerBuilder / RegisterStandardPasses), which was
+# removed in LLVM 16, so we pin clang/llvm 14. Builds afl-fuzz first (top-level
+# make produces afl-showmap, which llvm_mode's test_deps requires), then the
+# llvm_mode instrumentation. This must stay green before any SHS C wiring lands.
+
+on:
+  push:
+    paths:
+      - "**.c"
+      - "**.h"
+      - "llvm_mode/**"
+      - "Makefile"
+      - ".github/workflows/build-linux.yml"
+  pull_request:
+    paths:
+      - "**.c"
+      - "**.h"
+      - "llvm_mode/**"
+      - "Makefile"
+      - ".github/workflows/build-linux.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang/llvm 14
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-14 llvm-14-dev
+
+      - name: Build afl-fuzz and tools (top-level)
+        run: make CC=clang-14
+
+      - name: Build llvm_mode instrumentation
+        run: |
+          make -C llvm_mode \
+            LLVM_CONFIG=llvm-config-14 \
+            CC=clang-14 CXX=clang++-14
