@@ -133,6 +133,7 @@ namespace {
     void emitSrcmap(Instruction *I, const char *kind, const std::string &operand);
     const std::vector<std::string> &sourceLines(const std::string &path);
     static std::string constStr(Value *V);
+  };
 
 } // end anonymous namespace
 
