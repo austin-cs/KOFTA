@@ -13,9 +13,9 @@
   "commands": {
     "weifuzz":  "timeout {duration} wei-fuzz -i seeds/{target} -o {out} -x params/{target}.xml -- bin/{target} @@",
     "llmonly":  "kofta-llmconfig --source src/{target} --out {out}/params.xml && timeout {duration} wei-fuzz -i seeds/{target} -o {out} -x {out}/params.xml -- bin/{target} @@",
-    "kofta":    "timeout {duration} env KOFTA_SHS_BUDGET=0 ./afl-fuzz -i seeds/{target} -o {out} -- bin/{target}.kofta @@",
-    "kshs":     "timeout {duration} env KOFTA_SHS=1 KOFTA_SHS_BUDGET=60 KOFTA_SHS_MODEL=claude-haiku-4-5-20251001 KOFTA_SHS_CACHE={cache} KOFTA_SHS_COST={cost} ./afl-fuzz -i seeds/{target} -o {out} -- bin/{target}.kofta @@",
-    "kshsng":   "timeout {duration} env KOFTA_SHS=1 KOFTA_SHS_NOSLICE=1 KOFTA_SHS_BUDGET=60 KOFTA_SHS_MODEL=claude-haiku-4-5-20251001 KOFTA_SHS_CACHE={cache} KOFTA_SHS_COST={cost} ./afl-fuzz -i seeds/{target} -o {out} -- bin/{target}.kofta @@"
+    "kofta":    "timeout {duration} env KOFTA_SHS_BUDGET=0 ./kofta-fuzz -i seeds/{target} -o {out} -- bin/{target}.kofta @@",
+    "kshs":     "timeout {duration} env KOFTA_SHS=1 KOFTA_SHS_BIN=./kofta-shs KOFTA_SHS_BUDGET=60 KOFTA_SHS_MODEL=claude-haiku-4-5-20251001 KOFTA_SHS_CACHE={cache} KOFTA_SHS_COST={cost} ./kofta-fuzz -i seeds/{target} -o {out} -- bin/{target}.kofta @@",
+    "kshsng":   "timeout {duration} env KOFTA_SHS=1 KOFTA_SHS_NOSLICE=1 KOFTA_SHS_BIN=./kofta-shs KOFTA_SHS_BUDGET=60 KOFTA_SHS_MODEL=claude-haiku-4-5-20251001 KOFTA_SHS_CACHE={cache} KOFTA_SHS_COST={cost} ./kofta-fuzz -i seeds/{target} -o {out} -- bin/{target}.kofta @@"
   },
 
   "showmap": "./afl-showmap -q -m none -o {output} -- bin/{target}.kofta {input}",

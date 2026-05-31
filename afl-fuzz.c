@@ -2611,18 +2611,36 @@ static void dump_kofta_arglist(u8* alname) {
 
 
 /* ---- Semantic Hint Synthesis (SHS) -------------------------------------- *
- * Gated entirely on $KOFTA_SHS (the command used to reach the LLM endpoint,
- * e.g. "./kofta-shs query --mock --cache wd/shs/cache.json"). When unset the
- * whole path is inert and KOFTA behaves exactly as before. The model only
- * proposes candidate argument strings; the forkserver still decides whether a
- * candidate advances coverage, so correctness never depends on the LLM. The
- * source context for each comparison comes from the srcmap the LLVM pass wrote
- * (keyed by the observed operand), so no source tree is needed at fuzz time. */
+ * Enabled by $KOFTA_SHS=1. When off (unset/0) the whole path is inert and
+ * KOFTA behaves exactly as before. KOFTA launches one long-lived `kofta-shs
+ * serve` co-process and streams NDJSON over a pipe: one request line (verified
+ * branch facts) -> one response line (a JSON array of candidate strings). A
+ * persistent process is what lets the Python side accumulate cost across the
+ * whole campaign and dump it on exit (--cost-out), instead of paying process
+ * startup per stuck branch. Configuration comes from the environment:
+ *
+ *   KOFTA_SHS=1            enable SHS (any non-empty value except "0")
+ *   KOFTA_SHS_BIN=PATH     kofta-shs script (default: "kofta-shs" on $PATH)
+ *   KOFTA_SHS_MODEL=ID     LLM model id; absent -> --mock (offline, no cost)
+ *   KOFTA_SHS_CACHE=FILE   persistent prompt->candidates cache
+ *   KOFTA_SHS_COST=FILE    write the cost record here on exit (--cost-out)
+ *   KOFTA_SHS_BUDGET=N     max real LLM calls per hour
+ *   KOFTA_SHS_NOSLICE=1    omit the source slice from requests (kshsng ablation)
+ *
+ * The model only proposes candidate argument strings; the forkserver still
+ * decides whether a candidate advances coverage, so correctness never depends
+ * on the LLM. The source context for each comparison comes from the srcmap the
+ * LLVM pass wrote (keyed by the observed operand), so no source tree is needed
+ * at fuzz time. */
 
 #define KOFTA_SHS_MAX 16
 
-static u8* kofta_shs_cmd;        /* $KOFTA_SHS command string, NULL = off */
-static u8  kofta_shs_ready;      /* lazy-init guard */
+static u8    kofta_shs_on;       /* $KOFTA_SHS truthy -> SHS enabled */
+static u8    kofta_shs_ready;    /* lazy-init guard */
+static u8    kofta_shs_noslice;  /* $KOFTA_SHS_NOSLICE -> omit source slice */
+static FILE* kofta_shs_rx;       /* read end: serve co-process stdout */
+static int   kofta_shs_tx = -1;  /* write end: serve co-process stdin */
+static pid_t kofta_shs_pid = -1; /* serve co-process pid */
 
 struct kofta_srcrec {
   u8* operand;                   /* the comparison operand (lookup key) */
@@ -2631,20 +2649,10 @@ struct kofta_srcrec {
 static struct kofta_srcrec* kofta_srcmap;
 static u32 kofta_srcmap_cnt;
 
-static void kofta_shs_init(void) {
+/* Parse the srcmap the LLVM pass emitted (operand -> source slice). */
+static void kofta_shs_load_srcmap(const char* path) {
 
-  kofta_shs_ready = 1;
-
-  kofta_shs_cmd = (u8*)getenv("KOFTA_SHS");
-#ifdef KOFTA_DEBUG
-  kofta_debug("shs_init,cmd=%s\n", kofta_shs_cmd ? (char*)kofta_shs_cmd : "(null)");
-#endif
-  if (!kofta_shs_cmd) return;
-
-  u8* path = (u8*)getenv("KOFTA_SRCMAP");
-  if (!path) return;
-
-  FILE* f = fopen((char*)path, "r");
+  FILE* f = fopen(path, "r");
   if (!f) return;
 
   char*  line = NULL;
@@ -2692,6 +2700,120 @@ static void kofta_shs_init(void) {
 
 }
 
+/* write() loop that tolerates partial writes; returns 0 on success. */
+static int kofta_write_all(int fd, const u8* buf, u32 len) {
+
+  u32 off = 0;
+  while (off < len) {
+    ssize_t w = write(fd, buf + off, len - off);
+    if (w <= 0) return 1;
+    off += (u32)w;
+  }
+  return 0;
+
+}
+
+/* Tear down the serve co-process. Closing its stdin gives it EOF, so the serve
+   loop ends and kofta-shs dumps --cost-out before exiting. Registered both via
+   atexit and from the SIGINT/SIGTERM stop path so the cost record survives a
+   timeout-driven kill. Idempotent. */
+static void kofta_shs_shutdown(void) {
+
+  if (kofta_shs_tx >= 0) { close(kofta_shs_tx); kofta_shs_tx = -1; }
+  if (kofta_shs_rx)      { fclose(kofta_shs_rx); kofta_shs_rx = NULL; }
+  if (kofta_shs_pid > 0) { int st; waitpid(kofta_shs_pid, &st, 0); kofta_shs_pid = -1; }
+
+}
+
+/* Build the `kofta-shs serve ...` argv from the environment and fork+exec it,
+   wiring two pipes for the NDJSON request/response stream. On any failure the
+   co-process state stays torn down so the seam is simply a no-op. */
+static void kofta_shs_spawn(void) {
+
+  u8* bin    = (u8*)getenv("KOFTA_SHS_BIN");
+  u8* model  = (u8*)getenv("KOFTA_SHS_MODEL");
+  u8* cache  = (u8*)getenv("KOFTA_SHS_CACHE");
+  u8* cost   = (u8*)getenv("KOFTA_SHS_COST");
+  u8* budget = (u8*)getenv("KOFTA_SHS_BUDGET");
+
+  char* av[16];
+  int   ac = 0;
+  av[ac++] = bin && *bin ? (char*)bin : (char*)"kofta-shs";
+  av[ac++] = (char*)"serve";
+  if (model && *model) { av[ac++] = (char*)"--model"; av[ac++] = (char*)model; }
+  else                   av[ac++] = (char*)"--mock";
+  if (cache  && *cache)  { av[ac++] = (char*)"--cache";    av[ac++] = (char*)cache; }
+  if (cost   && *cost)   { av[ac++] = (char*)"--cost-out"; av[ac++] = (char*)cost; }
+  if (budget && *budget) { av[ac++] = (char*)"--budget";   av[ac++] = (char*)budget; }
+  av[ac] = NULL;
+
+  int to_child[2], from_child[2];
+  if (pipe(to_child)) return;
+  if (pipe(from_child)) { close(to_child[0]); close(to_child[1]); return; }
+
+  pid_t pid = fork();
+  if (pid < 0) {
+    close(to_child[0]); close(to_child[1]);
+    close(from_child[0]); close(from_child[1]);
+    return;
+  }
+
+  if (!pid) {                       /* child: exec kofta-shs serve */
+    dup2(to_child[0], 0);
+    dup2(from_child[1], 1);
+    close(to_child[0]); close(to_child[1]);
+    close(from_child[0]); close(from_child[1]);
+    execvp(av[0], av);
+    _exit(127);
+  }
+
+  close(to_child[0]);
+  close(from_child[1]);
+  kofta_shs_tx  = to_child[1];
+  kofta_shs_rx  = fdopen(from_child[0], "r");
+  kofta_shs_pid = pid;
+
+  if (!kofta_shs_rx) {              /* fdopen failed: tear down */
+    close(kofta_shs_tx); kofta_shs_tx = -1;
+    close(from_child[0]);
+    if (kofta_shs_pid > 0) { int st; waitpid(kofta_shs_pid, &st, 0); }
+    kofta_shs_pid = -1;
+  }
+
+}
+
+static void kofta_shs_init(void) {
+
+  kofta_shs_ready = 1;
+
+  u8* en = (u8*)getenv("KOFTA_SHS");
+  kofta_shs_on = (en && en[0] && strcmp((char*)en, "0") != 0);
+#ifdef KOFTA_DEBUG
+  kofta_debug("shs_init,on=%d\n", kofta_shs_on);
+#endif
+  if (!kofta_shs_on) return;
+
+  kofta_shs_noslice = (getenv("KOFTA_SHS_NOSLICE") != NULL);
+
+  u8* path = (u8*)getenv("KOFTA_SRCMAP");
+  if (path) kofta_shs_load_srcmap((char*)path);
+
+  /* A dead co-process must not kill the fuzzer with SIGPIPE; we detect the
+     broken pipe via write()/getline() return values instead. */
+  signal(SIGPIPE, SIG_IGN);
+
+  kofta_shs_spawn();
+  if (kofta_shs_pid <= 0) {
+#ifdef KOFTA_DEBUG
+    kofta_debug("%s", "shs_spawn_failed\n");
+#endif
+    kofta_shs_on = 0;
+    return;
+  }
+  atexit(kofta_shs_shutdown);
+
+}
+
 static u8* kofta_srcmap_lookup(u8* operand) {
 
   for (u32 i = 0; i < kofta_srcmap_cnt; i++)
@@ -2731,8 +2853,10 @@ static u8* kofta_json_append(u8* dst, u32* len, const char* src, u8 escape) {
 
 }
 
-/* Ask the SHS endpoint for candidate argument strings related to a stuck
-   comparison. Fills out[] (each KOFTA_ARGV_SIZE bytes) and returns the count. */
+/* Ask the SHS serve co-process for candidate argument strings related to a
+   stuck comparison. Writes one NDJSON request line to the co-process stdin and
+   reads one JSON-array response line from its stdout. Fills out[] (each
+   KOFTA_ARGV_SIZE bytes) and returns the count. */
 
 static u32 kofta_shs_candidates(u8* option, const char* sink_type,
                                 u8* operand, arglist* out, u32 max) {
@@ -2740,13 +2864,17 @@ static u32 kofta_shs_candidates(u8* option, const char* sink_type,
   if (!kofta_shs_ready) kofta_shs_init();
 
 #ifdef KOFTA_DEBUG
-  kofta_debug("shs_call,%s,cmd=%d\n", (char*)operand, kofta_shs_cmd ? 1 : 0);
+  kofta_debug("shs_call,%s,on=%d\n", (char*)operand, kofta_shs_on);
 #endif
 
-  if (!kofta_shs_cmd) return 0;
+  if (!kofta_shs_on || kofta_shs_tx < 0 || !kofta_shs_rx) return 0;
 
-  u8* slice = kofta_srcmap_lookup(operand);
-  if (!slice) {
+  /* The slice is the source context the LLM reasons over. With KOFTA_SHS_NOSLICE
+     (the kshsng ablation) we deliberately withhold it. */
+
+  u8* slice = kofta_shs_noslice ? NULL : kofta_srcmap_lookup(operand);
+
+  if (!kofta_shs_noslice && !slice) {
 #ifdef KOFTA_DEBUG
     kofta_debug("shs_noslice,%s\n", (char*)operand);
 #endif
@@ -2761,38 +2889,38 @@ static u32 kofta_shs_candidates(u8* option, const char* sink_type,
   json = kofta_json_append(json, &jl, sink_type, 1);
   json = kofta_json_append(json, &jl, "\",\"observed_operand\":\"", 0);
   json = kofta_json_append(json, &jl, (char*)operand, 1);
-  json = kofta_json_append(json, &jl, "\",\"source_slice\":\"", 0);
-  json = kofta_json_append(json, &jl, (char*)slice, 1);
+  if (slice) {
+    json = kofta_json_append(json, &jl, "\",\"source_slice\":\"", 0);
+    json = kofta_json_append(json, &jl, (char*)slice, 1);
+  }
   json = kofta_json_append(json, &jl, "\"}\n", 0);
 
-  char tmp[] = "/tmp/kofta_shs_req_XXXXXX";
-  int  fd    = mkstemp(tmp);
-  if (fd < 0) { ck_free(json); return 0; }
-  ck_write(fd, json, jl, (u8*)tmp);
-  close(fd);
+  if (kofta_write_all(kofta_shs_tx, json, jl)) {
+    /* Broken pipe: serve died. Disable so we don't retry every stuck branch. */
+    ck_free(json);
+    kofta_shs_on = 0;
+#ifdef KOFTA_DEBUG
+    kofta_debug("shs_write_fail,%s\n", (char*)operand);
+#endif
+    return 0;
+  }
   ck_free(json);
 
-  u8*   cmd = alloc_printf("%s < %s", kofta_shs_cmd, tmp);
-  FILE* p   = popen((char*)cmd, "r");
-  ck_free(cmd);
-  if (!p) { unlink(tmp); return 0; }
-
-  u8*    resp = ck_alloc(1);
-  u32    rl   = 0;
-  char   buf[4096];
-  size_t got;
-  while ((got = fread(buf, 1, sizeof(buf), p)) > 0) {
-    resp = ck_realloc(resp, rl + got + 1);
-    memcpy(resp + rl, buf, got);
-    rl += got;
-    resp[rl] = '\0';
+  char*   line = NULL;
+  size_t  cap  = 0;
+  ssize_t got  = getline(&line, &cap, kofta_shs_rx);
+  if (got < 0) {
+    if (line) free(line);
+    kofta_shs_on = 0;
+#ifdef KOFTA_DEBUG
+    kofta_debug("shs_read_fail,%s\n", (char*)operand);
+#endif
+    return 0;
   }
-  pclose(p);
-  unlink(tmp);
 
   /* Parse the JSON array of strings: ["a","b",...]. */
   u32   cnt = 0;
-  char* q   = (char*)resp;
+  char* q   = line;
   while (cnt < max && (q = strchr(q, '"'))) {
     q++;
     u8* o = out[cnt];
@@ -2815,7 +2943,7 @@ static u32 kofta_shs_candidates(u8* option, const char* sink_type,
     if (*q == '"') q++;
     if (w) cnt++;
   }
-  ck_free(resp);
+  free(line);
 
 #ifdef KOFTA_DEBUG
   kofta_debug("shs_cand,%s,%u\n", (char*)operand, cnt);
