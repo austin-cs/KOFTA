@@ -6068,6 +6068,20 @@ static u8 fuzz_one(char** argv) {
             update_kofta_optlist(kofta_args->optcnt);
             kofta_tntana->mode = KOFTA_TNTANA_MODE_NOP;
             if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+
+            /* SHS augmentation (see opttnt1 for rationale). */
+            {
+              static arglist shs_cand[KOFTA_SHS_MAX];
+              u32 sc = kofta_shs_candidates(orig_opt, "strcmp",
+                                            kofta_tntana->hints[j].str,
+                                            shs_cand, KOFTA_SHS_MAX);
+              for (u32 c = 0; c < sc; c++) {
+                strcpy(curr_opt + i, (char*)shs_cand[c]);
+                update_kofta_optlist(kofta_args->optcnt);
+                kofta_tntana->mode = KOFTA_TNTANA_MODE_NOP;
+                if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
+              }
+            }
           }
           break;
 
