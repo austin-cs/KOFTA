@@ -1,6 +1,12 @@
 #!python3
 # -*- coding: utf-8 -*-
 
+# Defer annotation evaluation so the list[...]/dict[...] type hints below parse
+# on Ubuntu 20.04's system python3 (3.8), which predates PEP 585 runtime
+# subscription. Without this, importing the script raises
+# "TypeError: 'type' object is not subscriptable".
+from __future__ import annotations
+
 import argparse
 import csv
 import xml.etree.ElementTree as ET

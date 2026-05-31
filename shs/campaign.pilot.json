@@ -1,0 +1,23 @@
+{
+  "_comment": "Stage 2 PILOT spec -- NOT the real evaluation. Validates the campaign->postprocess->kofta-stats pipeline end-to-end with the toy docker/smoke.c target and the offline --mock SHS client (no API, no cost). Only KOFTA-buildable configs (kofta/kshs/kshsng); weifuzz/llmonly need an external wei-fuzz binary not in this repo. Must run inside the ubuntu:20.04 container (glibc<=2.33) via docker/run-pilot.sh, which sets up bin/{target}, seeds/{target}, opts/{target}.txt, srcmap.txt under cwd. Durations are tiny on purpose -- the goal is a clean artifact->table round-trip, not real fuzzing dynamics.",
+
+  "root": "pilot-campaign",
+  "targets": ["smoke"],
+  "runs": 2,
+  "duration_s": 25,
+
+  "env": {
+    "AFL_NO_UI": "1",
+    "AFL_SKIP_CPUFREQ": "1",
+    "AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES": "1"
+  },
+
+  "commands": {
+    "kofta":  "timeout {duration} env KOFTA_SHS_BUDGET=0 ./kofta-fuzz -i seeds/{target} -o {out} -m none -t 5000 -k opts/{target}.txt -- bin/{target}",
+    "kshs":   "timeout {duration} env PYTHONPATH=. KOFTA_SRCMAP=srcmap.txt KOFTA_SHS=1 KOFTA_SHS_BIN=./kofta-shs KOFTA_SHS_CACHE={cache} KOFTA_SHS_COST={cost} ./kofta-fuzz -i seeds/{target} -o {out} -m none -t 5000 -k opts/{target}.txt -- bin/{target}",
+    "kshsng": "timeout {duration} env PYTHONPATH=. KOFTA_SRCMAP=srcmap.txt KOFTA_SHS=1 KOFTA_SHS_NOSLICE=1 KOFTA_SHS_BIN=./kofta-shs KOFTA_SHS_CACHE={cache} KOFTA_SHS_COST={cost} ./kofta-fuzz -i seeds/{target} -o {out} -m none -t 5000 -k opts/{target}.txt -- bin/{target}"
+  },
+
+  "showmap": "./afl-showmap -q -m none -o {output} -- bin/{target} {input}",
+  "opts_cmd": "python3 kofta-opts {out} -c -d {state} -q"
+}

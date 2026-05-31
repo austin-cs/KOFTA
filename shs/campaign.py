@@ -104,7 +104,12 @@ def launch_one(spec: Spec, config: str, target: str, i: int,
     t0 = time.time()
     proc = subprocess.run(cmd, shell=True, env=env)
     wall = time.time() - t0
-    if proc.returncode != 0:
+    # A fuzzer runs until its wall-clock budget; the command templates cap it
+    # with `timeout {duration}`, and GNU timeout reports 124 when it had to send
+    # the signal (the normal end of a campaign, not an error). AFL itself exits
+    # 0 on SIGTERM, but timeout's own status masks that. Treat both as success;
+    # anything else is a real failure (build/seed/forkserver problem).
+    if proc.returncode not in (0, 124):
         pwarn(f"run exited {proc.returncode}: {config}/{target}/run-{i:02d}")
         return False
 
@@ -124,6 +129,14 @@ def _postprocess(spec: Spec, config: str, target: str, run_dir: Path,
     if spec.opts_cmd:
         cmd = _subst(spec.opts_cmd, target=target, out=run_dir, state=run_dir)
         subprocess.run(cmd, shell=True)
+        # kofta-opts writes opts.csv into {out} (= the cov run dir), but the
+        # undoc table loader reads <root>/undoc/<target>/<config>/<run>/opts.csv.
+        # Mirror it there so tab:undoc is populated (same pattern as cost below).
+        src = run_dir / "opts.csv"
+        if src.is_file():
+            dst = spec.root / "undoc" / target / config / run_dir.name
+            dst.mkdir(parents=True, exist_ok=True)
+            (dst / "opts.csv").write_text(src.read_text())
     cost = run_dir / "shs_cost.json"
     if cost.is_file():
         try:
