@@ -15,8 +15,8 @@ in the forkserver. A bad guess costs exactly one fork, so hallucinations are
 harmless. SHS is optional, budgeted, cached, and degrades gracefully to plain
 taint inference when its budget is exhausted.
 
-The research write-up lives in [`docs/paper/`](docs/paper/); the SHS evaluation
-is Section 8 (`Sections/8.SemanticHintSynthesis_ENG.tex`).
+The research write-up (the KOFTA / SHS paper) is maintained separately while it
+is under review and will be released here upon publication.
 
 ---
 
@@ -195,7 +195,7 @@ kofta-stats                LaTeX table / facts emitter
 kofta-opts, kofta-plot     option tabulation + coverage plots
 shs/                       SHS Python package: service, campaign, loaders, tables, tests
 docker/                    Ubuntu 20.04 build + smoke/pilot harnesses
-docs/                      AFL docs + docs/paper/ (the KOFTA / SHS write-up)
+docs/                      upstream AFL documentation
 ```
 
 ## Built on AFL
